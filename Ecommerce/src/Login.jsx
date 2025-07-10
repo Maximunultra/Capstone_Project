@@ -80,15 +80,23 @@ export default function Login({ onAuthChange }) {
         >
           {loading ? 'Logging in...' : 'Login'}
         </button>
-        <div className="text-center mt-4">
-  <button
-    onClick={() => navigate('/forgot-password')}
-    className="text-sm text-blue-600 hover:underline"
-  >
-    Forgot Password?
-  </button>
-</div>
-
+        
+        {/* Registration and Forgot Password Links */}
+        <div className="text-center mt-4 space-y-2">
+          <button
+            onClick={() => navigate('/register')}
+            className="w-full py-2 bg-green-600 text-white font-semibold rounded hover:bg-green-700 transition"
+          >
+            Create Account
+          </button>
+          
+          <button
+            onClick={() => navigate('/forgot-password')}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            Forgot Password?
+          </button>
+        </div>
       </div>
     </div>
   );

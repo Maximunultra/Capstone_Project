@@ -17,6 +17,9 @@ import SellerLayout from "./user_seller/Components/Layout";
 // Shared Components
 import Login from "./Login";
 import ForgotPassword from "./Components/ForgotPassword";
+import Register from "./UserRegistration";
+import UserProfileEdit from "./UserProfileEdit";  
+// Make sure the import path is correct
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -41,6 +44,11 @@ const App = () => {
       <Routes>
         <Route path="/login" element={<Login onAuthChange={handleAuthChange} />} />
 
+      {/* Registration Route */}
+        <Route 
+          path="/register" 
+          element={<Register onAuthChange={handleAuthChange} />} 
+        />
         <Route 
           path="/forgot-password" 
           element={<ForgotPassword />} 
@@ -97,6 +105,10 @@ const App = () => {
             <Navigate to="/buyer" replace />
           )
         } />
+
+        {/* Additional Routes */}
+        <Route path="/user-profile-edit/:id" element={<UserProfileEdit />} />
+        {/* This route is for editing user profiles, ensure the component handles the ID parameter */}
       </Routes>
     </Router>
   );
