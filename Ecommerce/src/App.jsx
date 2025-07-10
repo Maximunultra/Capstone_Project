@@ -40,7 +40,7 @@ const App = () => {
   };
 
   return (
-    <Router basename="/Capstone_Project/Ecommerce">
+    <Router>
       <Routes>
         <Route path="/login" element={<Login onAuthChange={handleAuthChange} />} />
 
