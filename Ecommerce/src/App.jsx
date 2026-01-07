@@ -5,6 +5,7 @@ import { BrowserRouter as Router, Route, Routes, Navigate } from "react-router-d
 // Admin Components
 import AdminDashboard from "./admin/Pages/Dashboard";
 import AdminLayout from "./admin/Components/Layout";
+import UsersManager from "./admin/Pages/Seller";
 
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
@@ -18,12 +19,21 @@ import SellerLayout from "./user_seller/Components/Layout";
 import Login from "./Login";
 import ForgotPassword from "./Components/ForgotPassword";
 import Register from "./UserRegistration";
-import UserProfileEdit from "./UserProfileEdit";  
-// Make sure the import path is correct
+import UserProfileEdit from "./UserProfileEdit";
+
+// Product Components
+import ProductListPage from "./user_seller/Pages/ProductList";
+import ProductDetailPage from "./Components/ProductDetail";
+import ProductEditPage from "./user_seller/Components/ProductEdit";
+
+// Promotion Components
+import PromotionRequestPage from "./Components/PromotionRequest";
+import PromotionManagementPage from "./Components/PromotionManagement";
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
+  const [userId, setUserId] = useState(null);
 
   useEffect(() => {
     const user = localStorage.getItem("user");
@@ -31,12 +41,17 @@ const App = () => {
       const userData = JSON.parse(user);
       setIsAuthenticated(true);
       setUserRole(userData.role);
+      setUserId(userData.id);
+      
+      // Debug log
+      console.log('🔐 Loaded user:', userData);
     }
   }, []);
 
-  const handleAuthChange = (authStatus, role) => {
+  const handleAuthChange = (authStatus, role, id) => {
     setIsAuthenticated(authStatus);
     setUserRole(role);
+    setUserId(id);
   };
 
   return (
@@ -44,7 +59,7 @@ const App = () => {
       <Routes>
         <Route path="/login" element={<Login onAuthChange={handleAuthChange} />} />
 
-      {/* Registration Route */}
+        {/* Registration Route */}
         <Route 
           path="/register" 
           element={<Register onAuthChange={handleAuthChange} />} 
@@ -61,6 +76,36 @@ const App = () => {
               <Routes>
                 <Route path="/" element={<AdminDashboard />} />
                 <Route path="/dashboard" element={<AdminDashboard />} />
+                
+                {/* Admin Product Routes */}
+                <Route 
+                  path="/products" 
+                  element={<ProductListPage userId={userId} userRole={userRole} />} 
+                />
+                <Route 
+                  path="/products/:id" 
+                  element={<ProductDetailPage />} 
+                />
+                <Route 
+                  path="/products/:id/edit" 
+                  element={<ProductEditPage />} 
+                />
+                
+                {/* Admin Promotion Routes */}
+                <Route 
+                  path="/promotions" 
+                  element={<PromotionManagementPage />} 
+                />
+                <Route 
+                  path="/promotions/create" 
+                  element={<PromotionRequestPage />} 
+                />
+                
+                {/* Admin Users Management */}
+                <Route 
+                  path="/users" 
+                  element={<UsersManager />} 
+                />
               </Routes>
             </AdminLayout>
           </PrivateRoute>
@@ -73,6 +118,30 @@ const App = () => {
               <Routes>
                 <Route path="/" element={<SellerDashboard />} />
                 <Route path="/dashboard" element={<SellerDashboard />} />
+                
+                {/* Seller Product Routes */}
+                <Route 
+                  path="/products" 
+                  element={<ProductListPage userId={userId} userRole={userRole} />} 
+                />
+                <Route 
+                  path="/products/:id" 
+                  element={<ProductDetailPage />} 
+                />
+                <Route 
+                  path="/products/:id/edit" 
+                  element={<ProductEditPage />} 
+                />
+                
+                {/* Seller Promotion Routes */}
+                <Route 
+                  path="/promotions" 
+                  element={<PromotionManagementPage />} 
+                />
+                <Route 
+                  path="/promotions/create" 
+                  element={<PromotionRequestPage />} 
+                />
               </Routes>
             </SellerLayout>
           </PrivateRoute>
@@ -83,7 +152,16 @@ const App = () => {
           <LandingLayout onAuthChange={handleAuthChange} isAuthenticated={isAuthenticated} userRole={userRole}>
             <Routes>
               <Route path="/" element={<BuyerDashboard />} />
-              {/* <Route path="/dashboard" element={<BuyerDashboard />} /> */}
+              
+              {/* Buyer Product Routes (view only) */}
+              <Route 
+                path="/products" 
+                element={<ProductListPage userId={userId} userRole={userRole} />} 
+              />
+              <Route 
+                path="/products/:id" 
+                element={<ProductDetailPage />} 
+              />
             </Routes>
           </LandingLayout>
         } />
@@ -108,7 +186,6 @@ const App = () => {
 
         {/* Additional Routes */}
         <Route path="/user-profile-edit/:id" element={<UserProfileEdit />} />
-        {/* This route is for editing user profiles, ensure the component handles the ID parameter */}
       </Routes>
     </Router>
   );

@@ -13,19 +13,22 @@ import {
   Menu
 } from 'lucide-react';
 
-const navItems = [
-  { to: "/", label: "Dashboard", icon: <LayoutDashboard className="w-5 h-5 mr-3" /> },
-  { to: "/products", label: "Products", icon: <Package className="w-5 h-5 mr-3" /> },
-  { to: "/orders", label: "Orders", icon: <ShoppingCart className="w-5 h-5 mr-3" /> },
-  { to: "/promotions", label: "Promotions", icon: <Megaphone className="w-5 h-5 mr-3" /> },
-  { to: "/messages", label: "Messages", icon: <MessageSquare className="w-5 h-5 mr-3" /> },
-  { to: "/analytics", label: "Analytics", icon: <BarChart4 className="w-5 h-5 mr-3" /> },
-  { to: "/customers", label: "Customers", icon: <Users className="w-5 h-5 mr-3" /> },
-];
-
-const Sidebar = ({ isOpen, toggleSidebar }) => {
+const Sidebar = ({ isOpen, toggleSidebar, userRole }) => {
   const location = useLocation();
   const currentPath = location.pathname;
+
+  // Get the role prefix from localStorage or props
+  const rolePrefix = userRole || JSON.parse(localStorage.getItem("user") || '{}').role || 'buyer';
+
+  const navItems = [
+    { to: `/${rolePrefix}`, label: "Dashboard", icon: <LayoutDashboard className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/analytics`, label: "Analytics", icon: <BarChart4 className="w-5 h-5 mr-3" /> },
+    // { to: `/${rolePrefix}/customers`, label: "Customers", icon: <Users className="w-5 h-5 mr-3" /> },
+  ];
 
   return (
     <aside
@@ -69,9 +72,9 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
       <div className="absolute bottom-0 left-0 w-full px-4 pb-6">
         <hr className="my-4 border-[#d6d1c4]" />
         <Link
-          to="/settings"
+          to={`/${rolePrefix}/settings`}
           className={`flex items-center px-3 py-2 rounded hover:bg-white ${
-            currentPath === "/settings" ? "bg-white font-semibold" : ""
+            currentPath === `/${rolePrefix}/settings` ? "bg-white font-semibold" : ""
           }`}
           onClick={isOpen && window.innerWidth < 640 ? toggleSidebar : undefined}
         >

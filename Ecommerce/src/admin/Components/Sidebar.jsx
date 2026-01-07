@@ -1,148 +1,98 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  Package, 
-  Warehouse, 
-  Move3D, 
+import {
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Megaphone,
+  MessageSquare,
   BarChart4,
-  ShoppingCart, 
-  Truck,
+  Users,
+  Settings,
   LogOut,
   Menu
 } from 'lucide-react';
 
-const Sidebar = () => {
-  const [isOpen, setIsOpen] = useState(false);
+const Sidebar = ({ isOpen, toggleSidebar, userRole }) => {
   const location = useLocation();
   const currentPath = location.pathname;
-  
-  const toggleSidebar = () => {
-    setIsOpen(!isOpen);
-  };
+
+  // Get the role prefix from localStorage or props
+  const rolePrefix = userRole || JSON.parse(localStorage.getItem("user") || '{}').role || 'buyer';
+
+  const navItems = [
+    { to: `/${rolePrefix}`, label: "Dashboard", icon: <LayoutDashboard className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-5 h-5 mr-3" /> },
+    // { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/analytics`, label: "Analytics", icon: <BarChart4 className="w-5 h-5 mr-3" /> },
+    { to: `/${rolePrefix}/users`, label: "Sellers", icon: <Users className="w-5 h-5 mr-3" /> },
+  ];
 
   return (
-    <div>
-      {/* Sidebar */}
-      <div
-        className={`bg-gray-900 text-gray-300 w-64 space-y-2 px-2 py-5 min-h-screen transition-all duration-300 ${
-          isOpen ? "block" : "hidden sm:block"
-        }`}
-      >
-        {/* Brand Logo */}
-        <div className="text-2xl font-bold text-white px-4 py-2 mb-6">
-          Multi-Warehouse
-        </div>
-        
-        <div className="space-y-1">
-          {/* Dashboard */}
-          <Link 
-            to="/" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <LayoutDashboard className="w-5 h-5 mr-3" />
-            Dashboard
-          </Link>
-          
-          {/* Inventory (Products) */}
-          <Link 
-            to="/products" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/products" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <Package className="w-5 h-5 mr-3" />
-            Inventory
-          </Link>
-          
-          {/* Warehouses */}
-          <Link 
-            to="/warehouses" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/warehouses" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <Warehouse className="w-5 h-5 mr-3" />
-            Warehouses
-          </Link>
-          
-          {/* Transfers */}
-          <Link 
-            to="/stock-movement" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/stock-movement" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <Move3D className="w-5 h-5 mr-3" />
-            Transfers
-          </Link>
-          
-          {/* Reports/Analytics */}
-          <Link 
-            to="/low-stock" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/low-stock" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <BarChart4 className="w-5 h-5 mr-3" />
-            Reports
-          </Link>
-          
-          {/* Order */}
-          <Link 
-            to="/order" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/order" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <ShoppingCart className="w-5 h-5 mr-3" />
-            Order
-          </Link>
-          
-          {/* Supplier */}
-          <Link 
-            to="/supplier" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/supplier" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <Truck className="w-5 h-5 mr-3" />
-            Supplier
-          </Link>
-
-           <Link 
-            to="/users" 
-            className={`flex items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 ${
-              currentPath === "/supplier" ? "bg-gray-800 text-white" : ""
-            }`}
-          >
-            <Truck className="w-5 h-5 mr-3" />
-            Users
-          </Link>
-          {/* Logout Button */}
-          <button
-            className="flex w-full items-center py-3 px-4 rounded-lg hover:bg-gray-800 transition duration-200 text-left"
-            onClick={() => {
-              localStorage.removeItem("user");
-              window.location.href = "/login";
-            }}
-          >
-            <LogOut className="w-5 h-5 mr-3" />
-            Logout
-          </button>
-        </div>
+    <aside
+      className={`
+        fixed top-0 left-0 h-full w-64 z-30 bg-[#e7e0cf] text-[#5c5042] shadow transition-transform duration-700
+        ${isOpen ? "translate-x-0" : "-translate-x-64"}
+      `}
+    >
+      <div className="flex items-center justify-between px-4 py-6 mb-4">
+        <span className="text-base font-semibold">Artisan</span>
+        {/* Burger/X button */}
+        <button
+          onClick={toggleSidebar}
+          className="p-2 rounded-md bg-[#e7e0cf] text-[#5c5042] shadow-none focus:outline-none transition-all"
+        >
+          <Menu
+            className={`w-6 h-6 transition-transform duration-1000 ${isOpen ? "" : "rotate-90"}`}
+          />
+        </button>
       </div>
-
-      {/* Mobile toggle button */}
-      <button 
-        onClick={toggleSidebar} 
-        className="sm:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-gray-900 text-white"
-      >
-        <Menu className="w-6 h-6" />
-      </button>
-    </div>
+      <nav>
+        <ul className="space-y-1">
+          {navItems.map((item) => (
+            <li key={item.to}>
+              <Link
+                to={item.to}
+                className={`flex items-center px-3 py-2 rounded transition ${
+                  currentPath === item.to
+                    ? "bg-white font-semibold"
+                    : "hover:bg-white"
+                }`}
+                onClick={isOpen && window.innerWidth < 640 ? toggleSidebar : undefined}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="absolute bottom-0 left-0 w-full px-4 pb-6">
+        <hr className="my-4 border-[#d6d1c4]" />
+        <Link
+          to={`/${rolePrefix}/settings`}
+          className={`flex items-center px-3 py-2 rounded hover:bg-white ${
+            currentPath === `/${rolePrefix}/settings` ? "bg-white font-semibold" : ""
+          }`}
+          onClick={isOpen && window.innerWidth < 640 ? toggleSidebar : undefined}
+        >
+          <Settings className="w-5 h-5 mr-3" />
+          Settings
+        </Link>
+        <button
+          className="flex w-full items-center px-3 py-2 rounded hover:bg-white mt-1"
+          onClick={() => {
+            localStorage.removeItem("user");
+            window.location.href = "/login";
+          }}
+        >
+          <LogOut className="w-5 h-5 mr-3" />
+          Logout
+        </button>
+      </div>
+    </aside>
   );
 };
 

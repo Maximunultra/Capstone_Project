@@ -1,10 +1,11 @@
 import React from "react";
+import PromotionPopup from '../../Components/PromotionPopup'; // ← ADD THIS
 
 
 const BuyerDashboard = () => {
   return (
    <>
-  
+   <PromotionPopup /> 
       <div className="mb-4">
         <span className="inline-block bg-[#e5ddcf] text-[#a48a6d] px-4 py-1 rounded-full text-sm font-semibold mb-6">
           Discover Handcrafted Excellence in Legazpi City

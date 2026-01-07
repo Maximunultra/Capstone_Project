@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import bcrypt from 'bcrypt';
 import { supabase } from "../server.js";
 
 const router = express.Router();
@@ -19,6 +20,19 @@ const upload = multer({
     }
   }
 });
+
+// Helper function to hash passwords (same as server.js)
+async function hashPassword(password) {
+  try {
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    console.log('✅ Password hashed successfully');
+    return hashedPassword;
+  } catch (error) {
+    console.error('❌ Error hashing password:', error);
+    throw new Error('Failed to hash password');
+  }
+}
 
 // Helper function to upload image to Supabase Storage
 const uploadImageToSupabase = async (file, userId) => {
@@ -66,13 +80,18 @@ router.post("/upload", upload.single('image'), async (req, res) => {
 
 // Get all users
 router.get("/", async (req, res) => {
-  // console.log("🔍 GET /api/users endpoint hit");
   try {
     const { data, error } = await supabase.from("users").select("*");
-    // console.log("📊 Query result:", { data, error, count: data?.length });
     
     if (error) throw error;
-    res.json(data);
+    
+    // Remove password_hash from all users before sending
+    const usersWithoutPasswords = data.map(user => {
+      const { password_hash, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    });
+    
+    res.json(usersWithoutPasswords);
   } catch (error) {
     console.error("❌ Error:", error);
     res.status(500).json({ error: error.message });
@@ -82,6 +101,7 @@ router.get("/", async (req, res) => {
 // Create a new user
 router.post("/", async (req, res) => {
   try {
+    console.log('📝 User registration request received');
     const { full_name, email, password, role, phone, address, profile_image } = req.body;
     
     if (!full_name || !email || !password || !role) {
@@ -114,33 +134,47 @@ router.post("/", async (req, res) => {
       return res.status(409).json({ error: "User with this email already exists" });
     }
 
+    // Hash the password before storing
+    console.log('🔐 Hashing password...');
+    const hashedPassword = await hashPassword(password);
+    console.log('✅ Password hashed, length:', hashedPassword.length);
+
     // Create user data object
     const userData = {
       full_name,
       email,
-      password_hash: password, // Note: You should hash this password in production
+      password_hash: hashedPassword,
       role,
       phone: phone || null,
       address: address || null,
-      profile_image: profile_image || null
+      profile_image: profile_image || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
+    console.log('💾 Creating user in database...');
     const { data, error } = await supabase
       .from("users")
       .insert([userData])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Database error:', error);
+      throw error;
+    }
+
+    console.log('✅ User created successfully:', data.email);
 
     // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.status(201).json(userResponse);
   } catch (error) {
-    console.error('User creation error:', error);
+    console.error('❌ User creation error:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get a single user by ID
 router.get("/:id", async (req, res) => {
   try {
@@ -173,7 +207,14 @@ router.put("/:id", async (req, res) => {
     const updateFields = {};
     if (full_name) updateFields.full_name = full_name;
     if (email) updateFields.email = email;
-    if (password) updateFields.password_hash = password; // Hash this in production
+    
+    // Hash password if it's being updated
+    if (password) {
+      console.log('🔐 Hashing new password for update...');
+      updateFields.password_hash = await hashPassword(password);
+      console.log('✅ Password hashed for update');
+    }
+    
     if (role) updateFields.role = role;
     if (phone !== undefined) updateFields.phone = phone;
     if (address !== undefined) updateFields.address = address;
@@ -191,11 +232,13 @@ router.put("/:id", async (req, res) => {
 
     if (error) throw error;
     
+    console.log('✅ User updated successfully');
+    
     // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
   } catch (error) {
-    console.error('User update error:', error);
+    console.error('❌ User update error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -233,9 +276,10 @@ router.delete("/:id", async (req, res) => {
       }
     }
 
+    console.log('✅ User deleted successfully');
     res.json({ message: "User deleted successfully" });
   } catch (error) {
-    console.error('User deletion error:', error);
+    console.error('❌ User deletion error:', error);
     res.status(500).json({ error: error.message });
   }
 });
