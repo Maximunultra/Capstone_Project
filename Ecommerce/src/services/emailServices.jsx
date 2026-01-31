@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5000';
-
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/';
 // Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

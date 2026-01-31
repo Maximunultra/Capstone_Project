@@ -10,10 +10,17 @@ import UsersManager from "./admin/Pages/Seller";
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
 import LandingLayout from "./user_buyer/Components/LandingLayout";
+import Productlistpage from "./user_buyer/Pages/Productlistpage";
+import CartPage from "./user_buyer/Pages/CartPage";
+import CheckoutPage from "./user_buyer/Pages/CheckoutPage";
+import OrdersPage from "./user_buyer/Pages/OrdersPage";
+import OrderDetailsPage from "./user_buyer/Pages/OrderDetailsPage";
 
 // Seller Components
 import SellerDashboard from "./user_seller/Pages/Dashboard";
 import SellerLayout from "./user_seller/Components/Layout";
+import SellerOrderManagement from "./user_seller/Pages/SellerOrderManagement";
+import SellerAnalytics from "./user_seller/Pages/Selleranalytics";
 
 // Shared Components
 import Login from "./Login";
@@ -106,6 +113,18 @@ const App = () => {
                   path="/users" 
                   element={<UsersManager />} 
                 />
+
+                {/* Admin Orders Management */}
+                <Route 
+                  path="/orders" 
+                  element={<SellerOrderManagement />} 
+                />
+
+                {/* Admin Analytics */}
+                <Route 
+                  path="/analytics" 
+                  element={<SellerAnalytics />} 
+                />
               </Routes>
             </AdminLayout>
           </PrivateRoute>
@@ -142,6 +161,18 @@ const App = () => {
                   path="/promotions/create" 
                   element={<PromotionRequestPage />} 
                 />
+
+                {/* Seller Orders Management */}
+                <Route 
+                  path="/orders" 
+                  element={<SellerOrderManagement />} 
+                />
+
+                {/* Seller Analytics */}
+                <Route 
+                  path="/analytics" 
+                  element={<SellerAnalytics />} 
+                />
               </Routes>
             </SellerLayout>
           </PrivateRoute>
@@ -156,11 +187,33 @@ const App = () => {
               {/* Buyer Product Routes (view only) */}
               <Route 
                 path="/products" 
-                element={<ProductListPage userId={userId} userRole={userRole} />} 
+                element={<Productlistpage userId={userId} userRole={userRole} />} 
               />
               <Route 
                 path="/products/:id" 
                 element={<ProductDetailPage />} 
+              />
+              
+              {/* Cart Route */}
+              <Route 
+                path="/cart" 
+                element={<CartPage userId={userId} />} 
+              />
+
+              {/* Checkout Route */}
+              <Route 
+                path="/checkout" 
+                element={<CheckoutPage userId={userId} />} 
+              />
+
+              {/* Orders Routes */}
+              <Route 
+                path="/orders" 
+                element={<OrdersPage userId={userId} />} 
+              />
+              <Route 
+                path="/orders/:orderId" 
+                element={<OrderDetailsPage />} 
               />
             </Routes>
           </LandingLayout>
