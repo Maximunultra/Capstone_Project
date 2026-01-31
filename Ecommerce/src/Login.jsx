@@ -11,9 +11,9 @@ export default function Login({ onAuthChange }) {
   const handleLogin = async () => {
     if (!email || !password) return alert('Please enter email and password');
     setLoading(true);
-
+// 'http://localhost:5000/api/auth/login'
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', {
+      const res = await axios.post('https://capstone-project-1msq.onrender.com/api/auth/login', {
         email,
         password,
       });
