@@ -1,340 +1,342 @@
-// analytics.js - Add this to your routes folder
+// routes/analytics.js
 import express from "express";
 import { supabase } from "../server.js";
 
 const router = express.Router();
 
-// GET - Dashboard summary statistics
+// ─────────────────────────────────────────
+// GET /api/analytics/summary
+// ─────────────────────────────────────────
 router.get("/summary", async (req, res) => {
   try {
-    const { user_id } = req.query;
-    
-    console.log('📊 Fetching analytics summary');
-
-    // Get all orders for the seller
-    const { data: orders, error: ordersError } = await supabase
-      .from("orders")
-      .select(`
-        id,
-        total_amount,
-        order_date,
-        order_status,
-        order_items (
-          quantity,
-          product:product_id (
-            category
-          )
-        )
-      `)
-      .eq("order_status", "delivered");
-
-    if (ordersError) throw ordersError;
-
-    // Calculate total revenue
-    const totalRevenue = orders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
-
-    // Calculate products sold
-    const productsSold = orders.reduce((sum, order) => {
-      return sum + order.order_items.reduce((itemSum, item) => itemSum + item.quantity, 0);
-    }, 0);
-
-    // Calculate average order value
-    const avgOrderValue = orders.length > 0 ? totalRevenue / orders.length : 0;
-
-    // Calculate revenue growth (compare with previous period)
     const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    
-    const currentMonthOrders = orders.filter(o => new Date(o.order_date) >= currentMonthStart);
-    const lastMonthOrders = orders.filter(o => {
-      const date = new Date(o.order_date);
-      return date >= lastMonthStart && date < currentMonthStart;
-    });
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
 
-    const currentMonthRevenue = currentMonthOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
-    const lastMonthRevenue = lastMonthOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
-    
-    const revenueGrowth = lastMonthRevenue > 0 
-      ? ((currentMonthRevenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1)
-      : 0;
+    // Pull current + last month from analytics_monthly_summary
+    const { data: current } = await supabase
+      .from("analytics_monthly_summary")
+      .select("total_revenue, total_orders, total_customers, revenue_growth_percentage, top_category")
+      .eq("year", currentYear)
+      .eq("month", currentMonth)
+      .single();
 
-    // Find top category
-    const categoryCount = {};
-    orders.forEach(order => {
-      order.order_items.forEach(item => {
-        const category = item.product?.category || 'Uncategorized';
-        categoryCount[category] = (categoryCount[category] || 0) + item.quantity;
+    const { data: last } = await supabase
+      .from("analytics_monthly_summary")
+      .select("total_revenue, total_orders")
+      .eq("year", lastMonthYear)
+      .eq("month", lastMonth)
+      .single();
+
+    if (current) {
+      const totalRevenue = parseFloat(current.total_revenue);
+      const lastRevenue = last ? parseFloat(last.total_revenue) : 0;
+      const lastOrders = last ? last.total_orders : 0;
+      const currentAOV = current.total_orders > 0 ? totalRevenue / current.total_orders : 0;
+      const lastAOV = lastOrders > 0 ? lastRevenue / lastOrders : 0;
+
+      return res.json({
+        success: true,
+        stats: {
+          totalRevenue: totalRevenue.toFixed(2),
+          revenueGrowth: parseFloat(current.revenue_growth_percentage || 0).toFixed(1),
+          productsSold: current.total_customers,
+          avgOrderValue: currentAOV.toFixed(2),
+          avgOrderChange: lastAOV > 0 ? (((currentAOV - lastAOV) / lastAOV) * 100).toFixed(1) : 0,
+          topCategory: current.top_category || "N/A"
+        }
       });
+    }
+
+    // ── Fallback: calculate directly from orders + order_items ──
+    const currentStart = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
+    const nextStart =
+      currentMonth === 12
+        ? `${currentYear + 1}-01-01`
+        : `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}-01`;
+    const lastStart = `${lastMonthYear}-${String(lastMonth).padStart(2, "0")}-01`;
+
+    const { data: currentOrders } = await supabase
+      .from("orders")
+      .select("id, total_amount, user_id")
+      .eq("order_status", "delivered")
+      .gte("order_date", currentStart)
+      .lt("order_date", nextStart);
+
+    const { data: lastOrders2 } = await supabase
+      .from("orders")
+      .select("total_amount")
+      .eq("order_status", "delivered")
+      .gte("order_date", lastStart)
+      .lt("order_date", currentStart);
+
+    // total items sold from order_items for current month orders
+    const currentOrderIds = (currentOrders || []).map((o) => o.id);
+    let productsSold = 0;
+    if (currentOrderIds.length > 0) {
+      const { data: items } = await supabase
+        .from("order_items")
+        .select("quantity")
+        .in("order_id", currentOrderIds);
+      productsSold = (items || []).reduce((sum, i) => sum + i.quantity, 0);
+    }
+
+    const totalRevenue = (currentOrders || []).reduce((s, o) => s + parseFloat(o.total_amount), 0);
+    const lastRevenue = (lastOrders2 || []).reduce((s, o) => s + parseFloat(o.total_amount), 0);
+    const revenueGrowth = lastRevenue > 0 ? ((totalRevenue - lastRevenue) / lastRevenue) * 100 : 0;
+    const avgOrderValue = currentOrders?.length > 0 ? totalRevenue / currentOrders.length : 0;
+
+    // top category from product table via order_items
+    const { data: catItems } = await supabase
+      .from("order_items")
+      .select("product_category, quantity")
+      .in("order_id", currentOrderIds);
+
+    const catMap = {};
+    (catItems || []).forEach((i) => {
+      const cat = i.product_category || "Uncategorized";
+      catMap[cat] = (catMap[cat] || 0) + i.quantity;
     });
-
-    const topCategory = Object.entries(categoryCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
-
-    // Calculate AOV change
-    const currentMonthAOV = currentMonthOrders.length > 0 
-      ? currentMonthOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0) / currentMonthOrders.length
-      : 0;
-    const lastMonthAOV = lastMonthOrders.length > 0
-      ? lastMonthOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0) / lastMonthOrders.length
-      : 0;
-    
-    const avgOrderChange = lastMonthAOV > 0
-      ? ((currentMonthAOV - lastMonthAOV) / lastMonthAOV * 100).toFixed(1)
-      : 0;
+    const topCategory =
+      Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
 
     res.json({
       success: true,
       stats: {
         totalRevenue: totalRevenue.toFixed(2),
-        revenueGrowth: parseFloat(revenueGrowth),
+        revenueGrowth: revenueGrowth.toFixed(1),
         productsSold,
         avgOrderValue: avgOrderValue.toFixed(2),
-        avgOrderChange: parseFloat(avgOrderChange),
+        avgOrderChange: 0,
         topCategory
       }
     });
-
   } catch (error) {
-    console.error("❌ Error fetching analytics summary:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    console.error("Error /summary:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET - Monthly sales data for charts
+// ─────────────────────────────────────────
+// GET /api/analytics/sales-by-month?year=2025
+// ─────────────────────────────────────────
 router.get("/sales-by-month", async (req, res) => {
   try {
-    const { year = new Date().getFullYear() } = req.query;
-    
-    console.log('📈 Fetching monthly sales data');
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-    const { data: orders, error } = await supabase
+    // Pull from analytics_monthly_summary
+    const { data: rows } = await supabase
+      .from("analytics_monthly_summary")
+      .select("month, total_revenue, total_orders, total_customers")
+      .eq("year", year)
+      .order("month", { ascending: true });
+
+    if (rows && rows.length > 0) {
+      const result = monthNames.map((name, i) => {
+        const row = rows.find((r) => r.month === i + 1);
+        return {
+          month: name,
+          revenue: row ? Math.round(parseFloat(row.total_revenue)) : 0,
+          orders: row ? row.total_orders : 0,
+          customers: row ? row.total_customers : 0
+        };
+      });
+
+      return res.json({ success: true, data: result });
+    }
+
+    // ── Fallback: aggregate from orders ──
+    const { data: orders } = await supabase
       .from("orders")
-      .select(`
-        order_date,
-        total_amount,
-        order_status,
-        user_id
-      `)
+      .select("order_date, total_amount, user_id")
       .eq("order_status", "delivered")
       .gte("order_date", `${year}-01-01`)
-      .lte("order_date", `${year}-12-31`);
+      .lt("order_date", `${year + 1}-01-01`);
 
-    if (error) throw error;
-
-    // Group by month
-    const monthlyData = Array.from({ length: 12 }, (_, i) => ({
-      month: new Date(year, i).toLocaleString('default', { month: 'short' }),
+    const buckets = monthNames.map((name) => ({
+      month: name,
       revenue: 0,
       orders: 0,
       customers: new Set()
     }));
 
-    orders.forEach(order => {
-      const month = new Date(order.order_date).getMonth();
-      monthlyData[month].revenue += parseFloat(order.total_amount);
-      monthlyData[month].orders += 1;
-      monthlyData[month].customers.add(order.user_id);
+    (orders || []).forEach((o) => {
+      const m = new Date(o.order_date).getMonth();
+      buckets[m].revenue += parseFloat(o.total_amount);
+      buckets[m].orders += 1;
+      buckets[m].customers.add(o.user_id);
     });
 
-    // Convert Set to count
-    const result = monthlyData.map(data => ({
-      month: data.month,
-      revenue: Math.round(data.revenue),
-      orders: data.orders,
-      customers: data.customers.size
+    const result = buckets.map((b) => ({
+      month: b.month,
+      revenue: Math.round(b.revenue),
+      orders: b.orders,
+      customers: b.customers.size
     }));
 
-    res.json({
-      success: true,
-      data: result
-    });
-
+    res.json({ success: true, data: result });
   } catch (error) {
-    console.error("❌ Error fetching monthly sales:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    console.error("Error /sales-by-month:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET - Category distribution
+// ─────────────────────────────────────────
+// GET /api/analytics/category-distribution
+// ─────────────────────────────────────────
 router.get("/category-distribution", async (req, res) => {
   try {
-    console.log('🎯 Fetching category distribution');
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981"];
 
-    const { data: orderItems, error } = await supabase
-      .from("order_items")
-      .select(`
-        quantity,
-        product:product_id (
-          category
-        )
-      `);
+    // Pull from analytics_category for current month
+    const { data: rows } = await supabase
+      .from("analytics_category")
+      .select("category, revenue_percentage")
+      .eq("period_type", "monthly")
+      .eq("period_start", periodStart)
+      .order("revenue_percentage", { ascending: false })
+      .limit(5);
 
-    if (error) throw error;
-
-    // Count by category
-    const categoryCount = {};
-    let totalItems = 0;
-
-    orderItems.forEach(item => {
-      const category = item.product?.category || 'Uncategorized';
-      categoryCount[category] = (categoryCount[category] || 0) + item.quantity;
-      totalItems += item.quantity;
-    });
-
-    // Convert to percentage and format
-    const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
-    const result = Object.entries(categoryCount)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map((entry, index) => ({
-        name: entry[0],
-        value: parseFloat(((entry[1] / totalItems) * 100).toFixed(1)),
-        color: colors[index % colors.length]
+    if (rows && rows.length > 0) {
+      const result = rows.map((r, i) => ({
+        name: r.category,
+        value: parseFloat(r.revenue_percentage),
+        color: colors[i % colors.length]
       }));
 
-    res.json({
-      success: true,
-      data: result
-    });
-
-  } catch (error) {
-    console.error("❌ Error fetching category distribution:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// GET - Top selling products
-router.get("/top-products", async (req, res) => {
-  try {
-    const { limit = 5 } = req.query;
-    
-    console.log('🏆 Fetching top products');
-
-    const { data: orderItems, error } = await supabase
-      .from("order_items")
-      .select(`
-        product_id,
-        product_name,
-        quantity,
-        unit_price
-      `);
-
-    if (error) throw error;
-
-    // Aggregate by product
-    const productStats = {};
-    
-    orderItems.forEach(item => {
-      if (!productStats[item.product_id]) {
-        productStats[item.product_id] = {
-          name: item.product_name,
-          sales: 0,
-          revenue: 0
-        };
-      }
-      productStats[item.product_id].sales += item.quantity;
-      productStats[item.product_id].revenue += item.quantity * parseFloat(item.unit_price);
-    });
-
-    // Convert to array and sort by sales
-    const result = Object.values(productStats)
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, parseInt(limit))
-      .map(product => ({
-        name: product.name,
-        sales: product.sales,
-        revenue: Math.round(product.revenue)
-      }));
-
-    res.json({
-      success: true,
-      data: result
-    });
-
-  } catch (error) {
-    console.error("❌ Error fetching top products:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// GET - Revenue by date range
-router.get("/revenue-range", async (req, res) => {
-  try {
-    const { start_date, end_date } = req.query;
-    
-    if (!start_date || !end_date) {
-      return res.status(400).json({
-        success: false,
-        error: "start_date and end_date are required"
-      });
+      return res.json({ success: true, data: result });
     }
 
-    console.log('💰 Fetching revenue for date range');
+    // ── Fallback: aggregate from order_items for delivered orders this month ──
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonthStart =
+      month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-    const { data: orders, error } = await supabase
+    const { data: deliveredOrders } = await supabase
       .from("orders")
-      .select("total_amount, order_date")
+      .select("id")
       .eq("order_status", "delivered")
-      .gte("order_date", start_date)
-      .lte("order_date", end_date);
+      .gte("order_date", monthStart)
+      .lt("order_date", nextMonthStart);
 
-    if (error) throw error;
+    const deliveredIds = (deliveredOrders || []).map((o) => o.id);
 
-    const totalRevenue = orders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
+    if (deliveredIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
 
-    res.json({
-      success: true,
-      data: {
-        total_revenue: totalRevenue.toFixed(2),
-        order_count: orders.length,
-        start_date,
-        end_date
-      }
+    const { data: items } = await supabase
+      .from("order_items")
+      .select("product_category, quantity")
+      .in("order_id", deliveredIds);
+
+    const catMap = {};
+    let total = 0;
+    (items || []).forEach((i) => {
+      const cat = i.product_category || "Uncategorized";
+      catMap[cat] = (catMap[cat] || 0) + i.quantity;
+      total += i.quantity;
     });
 
+    const result = Object.entries(catMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, qty], i) => ({
+        name,
+        value: total > 0 ? parseFloat(((qty / total) * 100).toFixed(1)) : 0,
+        color: colors[i % colors.length]
+      }));
+
+    res.json({ success: true, data: result });
   } catch (error) {
-    console.error("❌ Error fetching revenue range:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    console.error("Error /category-distribution:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────
+// GET /api/analytics/top-products?limit=5
+// ─────────────────────────────────────────
+router.get("/top-products", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
+
+    // Pull from analytics_product for current month
+    const { data: rows } = await supabase
+      .from("analytics_product")
+      .select("product_name, units_sold, total_revenue")
+      .eq("period_type", "monthly")
+      .eq("period_start", periodStart)
+      .order("total_revenue", { ascending: false })
+      .limit(limit);
+
+    if (rows && rows.length > 0) {
+      const result = rows.map((r) => ({
+        name: r.product_name,
+        sales: r.units_sold,
+        revenue: Math.round(parseFloat(r.total_revenue))
+      }));
+
+      return res.json({ success: true, data: result });
+    }
+
+    // ── Fallback: aggregate from order_items for delivered orders this month ──
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonthStart =
+      month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+    const { data: deliveredOrders } = await supabase
+      .from("orders")
+      .select("id")
+      .eq("order_status", "delivered")
+      .gte("order_date", monthStart)
+      .lt("order_date", nextMonthStart);
+
+    const deliveredIds = (deliveredOrders || []).map((o) => o.id);
+
+    if (deliveredIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const { data: items } = await supabase
+      .from("order_items")
+      .select("product_id, product_name, quantity, unit_price")
+      .in("order_id", deliveredIds);
+
+    const map = {};
+    (items || []).forEach((i) => {
+      if (!map[i.product_id]) {
+        map[i.product_id] = { name: i.product_name, sales: 0, revenue: 0 };
+      }
+      map[i.product_id].sales += i.quantity;
+      map[i.product_id].revenue += i.quantity * parseFloat(i.unit_price);
     });
+
+    const result = Object.values(map)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, limit)
+      .map((p) => ({
+        name: p.name,
+        sales: p.sales,
+        revenue: Math.round(p.revenue)
+      }));
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Error /top-products:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 export default router;
-
-/*
-INTEGRATION INSTRUCTIONS:
-
-1. Create a new file: routes/analytics.js with this content
-
-2. Add this route to your server.js:
-   import analyticsRoutes from "./routes/analytics.js";
-   app.use("/api/analytics", analyticsRoutes);
-
-3. Update the API_BASE_URL in SellerAnalytics.jsx to match your server
-
-4. The analytics dashboard will fetch data from:
-   - GET /api/analytics/summary - Dashboard summary stats
-   - GET /api/analytics/sales-by-month?year=2024 - Monthly sales data
-   - GET /api/analytics/category-distribution - Category breakdown
-   - GET /api/analytics/top-products?limit=5 - Top selling products
-   - GET /api/analytics/revenue-range?start_date=2024-01-01&end_date=2024-12-31
-
-5. Make sure your database has proper indexes on:
-   - orders.order_date
-   - orders.order_status
-   - order_items.product_id
-*/
