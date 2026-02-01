@@ -19,7 +19,7 @@ import OrderDetailsPage from "./user_buyer/Pages/OrderDetailsPage";
 // Seller Components
 import SellerDashboard from "./user_seller/Pages/Dashboard";
 import SellerLayout from "./user_seller/Components/Layout";
-import SellerOrderManagement from "./user_seller/Pages/SellerOrderManagement";
+import SellerOrderManagement from "./user_seller/Pages/Sellerordermanagement";
 import SellerAnalytics from "./user_seller/Pages/Selleranalytics";
 
 // Shared Components
