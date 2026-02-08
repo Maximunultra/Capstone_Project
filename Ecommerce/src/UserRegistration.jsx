@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
 
 // API base URL - adjust this to match your server
 const API_BASE_URL = 'http://localhost:5000/api'; // Change this to your actual API URL
@@ -16,6 +16,8 @@ const UserRegistration = ({ onBackToLogin }) => {
   });
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [proofDocument, setProofDocument] = useState(null);
+  const [documentPreview, setDocumentPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [success, setSuccess] = useState(false);
@@ -71,6 +73,42 @@ const UserRegistration = ({ onBackToLogin }) => {
     }
   };
 
+  const handleDocumentChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({
+          ...prev,
+          document: 'Please select a valid image file'
+        }));
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({
+          ...prev,
+          document: 'Document size must be less than 5MB'
+        }));
+        return;
+      }
+
+      setProofDocument(file);
+      setErrors(prev => ({
+        ...prev,
+        document: ''
+      }));
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setDocumentPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
 
@@ -96,6 +134,11 @@ const UserRegistration = ({ onBackToLogin }) => {
 
     if (formData.phone && !/^\+?[\d\s\-\(\)]+$/.test(formData.phone)) {
       newErrors.phone = 'Please enter a valid phone number';
+    }
+
+    // Require proof document for sellers
+    if (formData.role === 'seller' && !proofDocument) {
+      newErrors.document = 'Barangay certificate or proof of residence is required for sellers';
     }
 
     return newErrors;
@@ -142,7 +185,13 @@ const UserRegistration = ({ onBackToLogin }) => {
         profileImageUrl = await uploadImage(profileImage);
       }
 
-      // Step 2: Create user via API
+      // Step 2: Upload proof document for sellers
+      let proofDocumentUrl = null;
+      if (formData.role === 'seller' && proofDocument) {
+        proofDocumentUrl = await uploadImage(proofDocument);
+      }
+
+      // Step 3: Create user via API
       const userData = {
         full_name: formData.fullName,
         email: formData.email,
@@ -150,7 +199,8 @@ const UserRegistration = ({ onBackToLogin }) => {
         role: formData.role,
         phone: formData.phone || null,
         address: formData.address || null,
-        profile_image: profileImageUrl
+        profile_image: profileImageUrl,
+        proof_document: proofDocumentUrl // Add proof document to user data
       };
 
       const response = await fetch(`${API_BASE_URL}/users`, {
@@ -183,6 +233,8 @@ const UserRegistration = ({ onBackToLogin }) => {
       });
       setProfileImage(null);
       setImagePreview(null);
+      setProofDocument(null);
+      setDocumentPreview(null);
 
     } catch (error) {
       console.error('Registration error:', error);
@@ -199,7 +251,16 @@ const UserRegistration = ({ onBackToLogin }) => {
           <CheckCircle className="mx-auto h-12 w-12 text-green-500 mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Registration Successful!</h2>
           <p className="text-gray-600 mb-4">
-            Your account has been created successfully. Please check your email to verify your account.
+            {formData.role === 'seller' ? (
+              <>
+                Your seller account has been created successfully. Your account is currently pending approval. 
+                You will receive an email once an administrator reviews your documents and approves your account.
+              </>
+            ) : (
+              <>
+                Your account has been created successfully. You can now log in and start using the platform.
+              </>
+            )}
           </p>
           <button
             onClick={() => setSuccess(false)}
@@ -211,6 +272,7 @@ const UserRegistration = ({ onBackToLogin }) => {
       </div>
     );
   }
+
   const handleBackToLogin = () => {
     if (onBackToLogin) {
       onBackToLogin();
@@ -219,9 +281,10 @@ const UserRegistration = ({ onBackToLogin }) => {
       window.location.href = '/login';
     }
   };
+
   return (
     <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
-        {/* Header with Back Button */}
+      {/* Header with Back Button */}
       <div className="flex items-center mb-6">
         <button
           onClick={handleBackToLogin}
@@ -385,7 +448,7 @@ const UserRegistration = ({ onBackToLogin }) => {
         {/* Role */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Role
+            Role *
           </label>
           <select
             name="role"
@@ -395,9 +458,60 @@ const UserRegistration = ({ onBackToLogin }) => {
           >
             <option value="buyer">Buyer</option>
             <option value="seller">Seller</option>
-            <option value="admin">Admin</option>
           </select>
         </div>
+
+        {/* Proof Document Upload - Only for Sellers */}
+        {formData.role === 'seller' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Barangay Certificate / Proof of Residence (Legazpi) *
+            </label>
+            <div className="mt-2 border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 transition duration-200">
+              <div className="flex flex-col items-center">
+                {documentPreview ? (
+                  <div className="relative w-full">
+                    <img 
+                      src={documentPreview} 
+                      alt="Document preview" 
+                      className="w-full h-48 object-contain rounded-md mb-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProofDocument(null);
+                        setDocumentPreview(null);
+                      }}
+                      className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <FileText className="w-12 h-12 text-gray-400 mb-2" />
+                )}
+                <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-200 flex items-center">
+                  <Upload className="w-4 h-4 mr-2" />
+                  {documentPreview ? 'Change Document' : 'Upload Document'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDocumentChange}
+                    className="hidden"
+                  />
+                </label>
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  Upload a clear photo of your Barangay Certificate or Proof of Residence in Legazpi
+                </p>
+              </div>
+            </div>
+            {errors.document && (
+              <p className="text-red-500 text-sm mt-1">{errors.document}</p>
+            )}
+          </div>
+        )}
 
         {/* Submit Error */}
         {errors.submit && (

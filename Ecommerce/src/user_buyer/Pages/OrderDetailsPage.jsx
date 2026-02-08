@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { MessageCircle, X, Send } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'http://localhost:5000/api';
 
 const OrderDetailsPage = () => {
   const navigate = useNavigate();
@@ -9,6 +11,9 @@ const OrderDetailsPage = () => {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   useEffect(() => {
     fetchOrderDetails();
@@ -21,6 +26,7 @@ const OrderDetailsPage = () => {
       const response = await fetch(`${API_BASE_URL}/orders/${orderId}`);
       if (!response.ok) throw new Error('Failed to fetch order details');
       const data = await response.json();
+      console.log('Order data:', data); // DEBUG
       setOrder(data.order);
     } catch (err) {
       setError(err.message);
@@ -60,7 +66,26 @@ const OrderDetailsPage = () => {
     });
   };
 
+  // Check if order can be cancelled (only pending and processing orders)
+  const canCancelOrder = () => {
+    if (!order) return false;
+    const cancellableStatuses = ['pending', 'processing'];
+    return cancellableStatuses.includes(order.order_status.toLowerCase());
+  };
+
+  // Check if message seller button should be shown (all statuses except cancelled)
+  const canMessageSeller = () => {
+    if (!order) return false;
+    const activeStatuses = ['pending', 'processing', 'shipped', 'delivered'];
+    return activeStatuses.includes(order.order_status.toLowerCase());
+  };
+
   const handleCancelOrder = async () => {
+    if (!canCancelOrder()) {
+      alert('This order cannot be cancelled at this stage.');
+      return;
+    }
+
     if (!window.confirm('Are you sure you want to cancel this order?')) {
       return;
     }
@@ -79,6 +104,85 @@ const OrderDetailsPage = () => {
       fetchOrderDetails();
     } catch (err) {
       alert('Error cancelling order: ' + err.message);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    console.log('=== SEND MESSAGE DEBUG ===');
+    console.log('Message text:', messageText);
+    console.log('Order:', order);
+    console.log('Order items:', order?.order_items);
+    
+    if (!messageText.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+
+    if (!order || !order.order_items || order.order_items.length === 0) {
+      alert('Unable to send message - no seller information available');
+      console.error('No order items found');
+      return;
+    }
+
+    // Get the first order item
+    const firstItem = order.order_items[0];
+    console.log('First order item:', firstItem);
+    console.log('Product:', firstItem.product);
+    console.log('Product user_id:', firstItem.product?.user_id);
+
+    // Get seller ID from the first order item's product (using user_id since that's the seller)
+    const sellerId = firstItem.product?.user_id;
+    
+    if (!sellerId) {
+      console.error('Seller ID not found. Product structure:', firstItem.product);
+      alert('Seller information not available. Please try again or contact support.');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    console.log('Current user:', currentUser);
+    
+    const buyerId = currentUser.id;
+
+    if (!buyerId) {
+      alert('User not logged in. Please log in and try again.');
+      return;
+    }
+
+    const messageData = {
+      sender_id: buyerId,  // ✅ FIXED: Keep as UUID string, don't parseInt
+      receiver_id: sellerId,  // ✅ FIXED: Keep as UUID string, don't parseInt
+      message: messageText.trim(),
+      order_id: parseInt(orderId),
+      product_id: parseInt(firstItem.product_id || firstItem.product?.id)
+    };
+
+    console.log('Sending message data:', messageData);
+
+    setSendingMessage(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messageData)
+      });
+
+      console.log('Response status:', response.status);
+      const data = await response.json();
+      console.log('Response data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send message');
+      }
+
+      alert('Message sent successfully!');
+      setMessageText('');
+      setShowMessageModal(false);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      alert('Error sending message: ' + err.message);
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -140,13 +244,41 @@ const OrderDetailsPage = () => {
               <span className={`px-4 py-2 rounded-full text-sm font-semibold border ${getStatusColor(order.order_status)}`}>
                 {order.order_status.charAt(0).toUpperCase() + order.order_status.slice(1)}
               </span>
-              {order.order_status === 'pending' && (
-                <button
-                  onClick={handleCancelOrder}
-                  className="text-sm text-red-600 hover:text-red-700 font-medium"
-                >
-                  Cancel Order
-                </button>
+              
+              {/* Action Buttons */}
+              <div className="flex gap-2">
+                {/* Cancel Order Button - Only show if order can be cancelled */}
+                {canCancelOrder() && (
+                  <button
+                    onClick={handleCancelOrder}
+                    className="text-sm text-red-600 hover:text-red-700 font-medium px-3 py-1 rounded hover:bg-red-50 transition"
+                  >
+                    Cancel Order
+                  </button>
+                )}
+                
+                {/* Message Seller Button - Show for all orders except cancelled */}
+                {canMessageSeller() && (
+                  <button
+                    onClick={() => {
+                      console.log('Message Seller button clicked');
+                      console.log('Order items available:', order.order_items);
+                      setShowMessageModal(true);
+                    }}
+                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium px-3 py-1 rounded hover:bg-blue-50 transition"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Message Seller
+                  </button>
+                )}
+              </div>
+
+              {/* Status Message for Delivered/Cancelled Orders */}
+              {order.order_status === 'delivered' && (
+                <p className="text-xs text-green-600 italic">✓ Order delivered successfully</p>
+              )}
+              {order.order_status === 'cancelled' && (
+                <p className="text-xs text-red-500 italic">This order has been cancelled</p>
               )}
             </div>
           </div>
@@ -350,6 +482,108 @@ const OrderDetailsPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Message Seller Modal */}
+      {showMessageModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <MessageCircle className="w-6 h-6" />
+                <div>
+                  <h2 className="text-xl font-bold">Message Seller</h2>
+                  <p className="text-sm text-blue-100">Regarding Order #{order.order_number}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMessageModal(false)}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {/* Product Info */}
+              {order.order_items && order.order_items.length > 0 && (
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <p className="text-sm text-gray-600 mb-2">Product:</p>
+                  <div className="flex items-center gap-3">
+                    {order.order_items[0].product?.product_image && (
+                      <img
+                        src={order.order_items[0].product.product_image}
+                        alt={order.order_items[0].product_name}
+                        className="w-12 h-12 object-cover rounded-lg"
+                      />
+                    )}
+                    <div>
+                      <p className="font-semibold text-gray-900">{order.order_items[0].product_name}</p>
+                      {order.order_items.length > 1 && (
+                        <p className="text-sm text-gray-500">+{order.order_items.length - 1} more item(s)</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Message Input */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Your Message
+                </label>
+                <textarea
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder="Type your message to the seller here..."
+                  className="w-full h-40 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none"
+                  disabled={sendingMessage}
+                  maxLength={500}
+                />
+                <p className="text-sm text-gray-500 mt-2">
+                  {messageText.length} / 500 characters
+                </p>
+              </div>
+
+              {/* Info Box */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> This message will be sent directly to the seller. They will be notified and can respond to your inquiry.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
+              <button
+                onClick={() => setShowMessageModal(false)}
+                disabled={sendingMessage}
+                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendMessage}
+                disabled={!messageText.trim() || sendingMessage}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {sendingMessage ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    Send Message
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

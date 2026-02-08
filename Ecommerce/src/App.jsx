@@ -6,7 +6,7 @@ import { BrowserRouter as Router, Route, Routes, Navigate } from "react-router-d
 import AdminDashboard from "./admin/Pages/Dashboard";
 import AdminLayout from "./admin/Components/Layout";
 import UsersManager from "./admin/Pages/Seller";
-
+import AdminAnalytics from "./admin/Pages/AdminAnalytics";  
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
 import LandingLayout from "./user_buyer/Components/LandingLayout";
@@ -15,13 +15,13 @@ import CartPage from "./user_buyer/Pages/CartPage";
 import CheckoutPage from "./user_buyer/Pages/CheckoutPage";
 import OrdersPage from "./user_buyer/Pages/OrdersPage";
 import OrderDetailsPage from "./user_buyer/Pages/OrderDetailsPage";
-
+import MessagesPage from './user_buyer/Pages/MessagesPage';
 // Seller Components
 import SellerDashboard from "./user_seller/Pages/Dashboard";
 import SellerLayout from "./user_seller/Components/Layout";
 import SellerOrderManagement from "./user_seller/Pages/Sellerordermanagement";
 import SellerAnalytics from "./user_seller/Pages/Selleranalytics";
-
+import SellerMessagesPage from "./user_seller/Pages/SellerMessagesPage";
 // Shared Components
 import Login from "./Login";
 import ForgotPassword from "./Components/ForgotPassword";
@@ -123,7 +123,7 @@ const App = () => {
                 {/* Admin Analytics */}
                 <Route 
                   path="/analytics" 
-                  element={<SellerAnalytics />} 
+                  element={<AdminAnalytics />} 
                 />
               </Routes>
             </AdminLayout>
@@ -173,6 +173,10 @@ const App = () => {
                   path="/analytics" 
                   element={<SellerAnalytics />} 
                 />
+                <Route 
+                  path="/messages" 
+                  element={<SellerMessagesPage />} 
+                />
               </Routes>
             </SellerLayout>
           </PrivateRoute>
@@ -212,9 +216,10 @@ const App = () => {
                 element={<OrdersPage userId={userId} />} 
               />
               <Route 
-                path="/orders/:orderId" 
+                path="/order/:orderId" 
                 element={<OrderDetailsPage />} 
               />
+              <Route path="/messages" element={<MessagesPage />} />
             </Routes>
           </LandingLayout>
         } />

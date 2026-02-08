@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, Clock, Edit2, X, Save } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign } from 'lucide-react';
 
 // API Base URL - Update this to your actual API endpoint
 const API_BASE_URL = 'http://localhost:5000/api';
@@ -12,9 +12,15 @@ const SellerOrderManagement = () => {
   const [editingTracking, setEditingTracking] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [selectedPaymentStatus, setSelectedPaymentStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Fetch all orders (you'll need to modify your backend to add an endpoint for all orders)
+  // Get current user info
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentUserId = currentUser.id;
+  const currentUserRole = currentUser.role;
+
+  // Fetch orders based on user role
   useEffect(() => {
     fetchOrders();
   }, [statusFilter]);
@@ -22,14 +28,40 @@ const SellerOrderManagement = () => {
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      // This endpoint would need to be created in your backend
-      const response = await fetch(`${API_BASE_URL}/orders${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`);
+      console.log('🔍 Fetching orders for user:', currentUserId, 'Role:', currentUserRole);
+
+      // Build query params
+      let url = `${API_BASE_URL}/orders`;
+      const params = new URLSearchParams();
+      
+      // If seller, add seller_id filter
+      if (currentUserRole === 'seller' && currentUserId) {
+        params.append('seller_id', currentUserId);
+      }
+      
+      if (statusFilter !== 'all') {
+        params.append('status', statusFilter);
+      }
+
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      console.log('📡 API Request URL:', url);
+
+      const response = await fetch(url);
       const data = await response.json();
+      
+      console.log('📦 Orders received:', data);
+
       if (data.success) {
         setOrders(data.orders);
+        console.log(`✅ Loaded ${data.orders.length} orders`);
+      } else {
+        console.error('❌ Failed to fetch orders:', data.error);
       }
     } catch (error) {
-      console.error('Error fetching orders:', error);
+      console.error('❌ Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
@@ -37,6 +69,12 @@ const SellerOrderManagement = () => {
 
   const handleUpdateStatus = async () => {
     if (!selectedOrder || !selectedStatus) return;
+    
+    // Prevent changing status if already delivered
+    if (selectedOrder.order_status === 'delivered') {
+      alert('Cannot change status of delivered orders');
+      return;
+    }
     
     try {
       setSaving(true);
@@ -50,9 +88,46 @@ const SellerOrderManagement = () => {
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, order_status: selectedStatus } : o));
         setSelectedOrder({ ...selectedOrder, order_status: selectedStatus });
+        alert('Order status updated successfully!');
+      } else {
+        alert(data.error || 'Failed to update status');
       }
     } catch (error) {
       console.error('Error updating status:', error);
+      alert('Error updating status');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdatePaymentStatus = async () => {
+    if (!selectedOrder || !selectedPaymentStatus) return;
+    
+    // Only allow payment status update for COD orders
+    if (selectedOrder.payment_method !== 'cod') {
+      alert('Payment status can only be modified for COD orders');
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/payment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payment_status: selectedPaymentStatus })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, payment_status: selectedPaymentStatus } : o));
+        setSelectedOrder({ ...selectedOrder, payment_status: selectedPaymentStatus });
+        alert('Payment status updated successfully!');
+      } else {
+        alert(data.error || 'Failed to update payment status');
+      }
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      alert('Error updating payment status');
     } finally {
       setSaving(false);
     }
@@ -74,9 +149,11 @@ const SellerOrderManagement = () => {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, tracking_number: trackingNumber } : o));
         setSelectedOrder({ ...selectedOrder, tracking_number: trackingNumber });
         setEditingTracking(false);
+        alert('Tracking number updated successfully!');
       }
     } catch (error) {
       console.error('Error updating tracking:', error);
+      alert('Error updating tracking number');
     } finally {
       setSaving(false);
     }
@@ -85,6 +162,7 @@ const SellerOrderManagement = () => {
   const openOrderDetails = (order) => {
     setSelectedOrder(order);
     setSelectedStatus(order.order_status);
+    setSelectedPaymentStatus(order.payment_status);
     setTrackingNumber(order.tracking_number || '');
     setEditingTracking(false);
   };
@@ -105,6 +183,15 @@ const SellerOrderManagement = () => {
     return configs[status] || configs.pending;
   };
 
+  const getPaymentStatusConfig = (status) => {
+    const configs = {
+      pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', label: 'Pending' },
+      paid: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Paid' },
+      failed: { color: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' }
+    };
+    return configs[status] || configs.pending;
+  };
+
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -118,183 +205,150 @@ const SellerOrderManagement = () => {
   };
 
   return (
-    <div style={{ 
-      fontFamily: '"Instrument Serif", Georgia, serif',
-      padding: '2rem',
-      minHeight: '100vh',
-      background: '#f3f4f6'
-    }}>
-
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
       {/* Header */}
-      <div style={{ maxWidth: '100%', margin: '0 auto' }}>
-        <div className="fade-in-up stagger-1">
-          <h1 style={{
-            fontSize: '2.5rem',
-            fontWeight: '400',
-            letterSpacing: '-0.02em',
-            color: '#1a1512',
-            marginBottom: '0.25rem',
-            fontStyle: 'italic'
-          }}>
-            Orders
-          </h1>
-          <p style={{
-            fontSize: '1rem',
-            color: '#6b635a',
-            marginBottom: '2rem',
-            fontFamily: 'Inter, -apple-system, sans-serif',
-            fontWeight: '400'
-          }}>
-            Manage your customer orders
-          </p>
-        </div>
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-2">
+              {currentUserRole === 'seller' ? 'My Orders' : 'Order Management'}
+            </h1>
+            <p className="text-gray-600">
+              {currentUserRole === 'seller' 
+                ? 'Manage orders containing your products' 
+                : 'Manage all customer orders'}
+            </p>
+          </div>
 
-        {/* Filters */}
-        <div className="fade-in-up stagger-2" style={{
-          marginBottom: '1.5rem',
-          display: 'flex',
-          gap: '0.75rem',
-          flexWrap: 'wrap'
-        }}>
-          {['all', 'pending', 'processing', 'shipped', 'delivered'].map(status => (
+          {/* Role Badge */}
+          {currentUserRole === 'admin' && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-6 py-3">
+              <p className="text-sm text-blue-800 font-medium">
+                👁️ Admin View - All Orders
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="max-w-7xl mx-auto mb-6">
+        <div className="flex gap-3 flex-wrap">
+          {['all', 'pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(status => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className="btn"
-              style={{
-                padding: '0.625rem 1.5rem',
-                border: statusFilter === status ? '2px solid #1a1512' : '2px solid #e5e7eb',
-                background: statusFilter === status ? '#1a1512' : 'white',
-                color: statusFilter === status ? 'white' : '#6b635a',
-                borderRadius: '6px',
-                fontSize: '0.9375rem',
-                fontWeight: '500',
-                cursor: 'pointer',
-                textTransform: 'capitalize'
-              }}
+              className={`px-6 py-2.5 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${
+                statusFilter === status
+                  ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-lg'
+                  : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-amber-300'
+              }`}
             >
-              {status}
+              {status.charAt(0).toUpperCase() + status.slice(1)}
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Orders Table */}
-        <div className="fade-in-up stagger-3" style={{
-          background: 'white',
-          borderRadius: '12px',
-          overflow: 'hidden',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-        }}>
+      {/* Orders Table */}
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden">
           {loading ? (
-            <div style={{
-              padding: '4rem',
-              textAlign: 'center',
-              color: '#6b635a',
-              fontFamily: 'Inter, -apple-system, sans-serif'
-            }}>
-              Loading orders...
+            <div className="p-16 text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mb-4"></div>
+              <p className="text-gray-600 font-medium">Loading orders...</p>
             </div>
           ) : orders.length === 0 ? (
-            <div style={{
-              padding: '4rem',
-              textAlign: 'center',
-              color: '#6b635a',
-              fontFamily: 'Inter, -apple-system, sans-serif'
-            }}>
-              No orders found
+            <div className="p-16 text-center">
+              <div className="text-6xl mb-4">📦</div>
+              <p className="text-gray-600 text-lg font-medium mb-2">No orders found</p>
+              <p className="text-gray-500 text-sm">
+                {currentUserRole === 'seller' 
+                  ? 'Orders containing your products will appear here' 
+                  : 'No orders match your filters'}
+              </p>
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ 
-                  borderBottom: '1px solid #e5e7eb',
-                  background: '#f9fafb'
-                }}>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Order ID</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Customer</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Date</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Amount</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Status</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Tracking #</th>
-                  <th style={{ padding: '1.25rem 1.5rem', textAlign: 'left', fontFamily: 'Inter', fontWeight: '600', fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b635a' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order, index) => {
-                  const statusConfig = getStatusConfig(order.order_status);
-                  const StatusIcon = statusConfig.icon;
-                  
-                  return (
-                    <tr
-                      key={order.id}
-                      className="table-row"
-                      onClick={() => openOrderDetails(order)}
-                      style={{
-                        borderBottom: '1px solid #e5e7eb',
-                        background: index % 2 === 0 ? 'white' : '#f9fafb'
-                      }}
-                    >
-                      <td style={{ padding: '1.25rem 1.5rem', fontFamily: 'Inter', fontSize: '0.9375rem', fontWeight: '500', color: '#1a1512' }}>
-                        {order.order_number}
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', fontFamily: 'Inter', fontSize: '0.9375rem', color: '#1a1512' }}>
-                        <div style={{ fontWeight: '500' }}>{order.shipping_full_name}</div>
-                        <div style={{ fontSize: '0.8125rem', color: '#6b635a', marginTop: '0.125rem' }}>{order.shipping_email}</div>
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', fontFamily: 'Inter', fontSize: '0.9375rem', color: '#6b635a' }}>
-                        {formatDate(order.order_date)}
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', fontFamily: 'Inter', fontSize: '0.9375rem', fontWeight: '600', color: '#1a1512' }}>
-                        {formatCurrency(order.total_amount)}
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <span 
-                          className={`status-badge ${statusConfig.color}`}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.5rem 1rem',
-                            borderRadius: '6px',
-                            fontSize: '0.8125rem',
-                            fontWeight: '600',
-                            border: '1.5px solid',
-                            fontFamily: 'Inter'
-                          }}
-                        >
-                          <StatusIcon size={14} />
-                          {statusConfig.label}
-                        </span>
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem', fontFamily: 'Inter', fontSize: '0.875rem', color: '#6b635a' }}>
-                        {order.tracking_number || '—'}
-                      </td>
-                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openOrderDetails(order);
-                          }}
-                          className="btn"
-                          style={{
-                            padding: '0.5rem 1.25rem',
-                            background: '#1a1512',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontSize: '0.875rem',
-                            fontWeight: '500',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Update
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-2 border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Order ID</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Customer</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Amount</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Payment</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Tracking #</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((order, index) => {
+                    const statusConfig = getStatusConfig(order.order_status);
+                    const paymentConfig = getPaymentStatusConfig(order.payment_status);
+                    const StatusIcon = statusConfig.icon;
+                    
+                    return (
+                      <tr
+                        key={order.id}
+                        className={`border-b border-gray-100 hover:bg-amber-50/50 transition-colors duration-200 cursor-pointer ${
+                          index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                        }`}
+                        onClick={() => openOrderDetails(order)}
+                      >
+                        <td className="px-6 py-4 font-semibold text-gray-900">
+                          {order.order_number}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="font-medium text-gray-900">{order.shipping_full_name}</div>
+                          <div className="text-sm text-gray-500">{order.shipping_email}</div>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600">
+                          {formatDate(order.order_date)}
+                        </td>
+                        <td className="px-6 py-4 font-bold text-gray-900">
+                          {formatCurrency(order.total_amount)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span 
+                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${statusConfig.color}`}
+                          >
+                            <StatusIcon size={14} />
+                            {statusConfig.label}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span 
+                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${paymentConfig.color}`}
+                          >
+                            {paymentConfig.label}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          {order.tracking_number || '—'}
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openOrderDetails(order);
+                            }}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-105 ${
+                              currentUserRole === 'admin'
+                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white'
+                                : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white'
+                            }`}
+                          >
+                            {currentUserRole === 'admin' ? 'View Details' : 'Update'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -302,239 +356,192 @@ const SellerOrderManagement = () => {
       {/* Order Details Modal */}
       {selectedOrder && (
         <div
-          className="overlay"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
           onClick={closeOrderDetails}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.4)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            padding: '2rem'
-          }}
         >
           <div
-            className="modal"
+            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'white',
-              borderRadius: '12px',
-              maxWidth: '600px',
-              width: '100%',
-              maxHeight: '90vh',
-              overflow: 'auto',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
-            }}
           >
             {/* Modal Header */}
-            <div style={{
-              padding: '2rem 2.5rem',
-              borderBottom: '1px solid #e5e7eb',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
+            <div className="px-8 py-6 border-b-2 border-gray-100 flex justify-between items-center bg-gradient-to-r from-amber-50 to-orange-50">
               <div>
-                <h2 style={{
-                  fontSize: '2rem',
-                  fontWeight: '400',
-                  fontStyle: 'italic',
-                  color: '#1a1512',
-                  marginBottom: '0.25rem'
-                }}>
+                <h2 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
                   Order Details
                 </h2>
-                <p style={{
-                  fontFamily: 'Inter',
-                  fontSize: '0.9375rem',
-                  color: '#6b635a'
-                }}>
+                <p className="text-gray-600 font-medium">
                   {selectedOrder.order_number}
                 </p>
               </div>
               <button
                 onClick={closeOrderDetails}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '0.5rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '8px',
-                  transition: 'background 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors duration-200"
               >
-                <X size={24} color="#6b635a" />
+                <X size={24} className="text-gray-600" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div style={{ padding: '2.5rem' }}>
+            <div className="p-8 space-y-6">
               {/* Customer Information */}
-              <div style={{ marginBottom: '2rem' }}>
-                <h3 style={{
-                  fontFamily: 'Inter',
-                  fontSize: '0.8125rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: '600',
-                  color: '#6b635a',
-                  marginBottom: '1rem'
-                }}>
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
                   Customer Information
                 </h3>
-                <div style={{
-                  background: '#f9fafb',
-                  padding: '1.5rem',
-                  borderRadius: '8px',
-                  fontFamily: 'Inter',
-                  fontSize: '0.9375rem'
-                }}>
-                  <div style={{ marginBottom: '0.75rem', color: '#1a1512' }}>
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl space-y-2">
+                  <div className="text-gray-900">
                     <strong>Name:</strong> {selectedOrder.shipping_full_name}
                   </div>
-                  <div style={{ marginBottom: '0.75rem', color: '#1a1512' }}>
+                  <div className="text-gray-900">
                     <strong>Email:</strong> {selectedOrder.shipping_email}
                   </div>
-                  <div style={{ marginBottom: '0.75rem', color: '#1a1512' }}>
+                  <div className="text-gray-900">
                     <strong>Phone:</strong> {selectedOrder.shipping_phone}
                   </div>
-                  <div style={{ color: '#1a1512' }}>
+                  <div className="text-gray-900">
                     <strong>Address:</strong> {selectedOrder.shipping_address}, {selectedOrder.shipping_city}, {selectedOrder.shipping_province} {selectedOrder.shipping_postal_code}
                   </div>
                 </div>
               </div>
 
               {/* Order Status */}
-              <div style={{ marginBottom: '2rem' }}>
-                <h3 style={{
-                  fontFamily: 'Inter',
-                  fontSize: '0.8125rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: '600',
-                  color: '#6b635a',
-                  marginBottom: '1rem'
-                }}>
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
                   Order Status
                 </h3>
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.875rem 1rem',
-                    border: '2px solid #e5e7eb',
-                    borderRadius: '12px',
-                    fontSize: '0.9375rem',
-                    fontWeight: '500',
-                    color: '#1a1512',
-                    background: 'white',
-                    cursor: 'pointer',
-                    transition: 'border-color 0.2s'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = '#1a1512'}
-                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="processing">Processing</option>
-                  <option value="shipped">Shipped</option>
-                  <option value="delivered">Delivered</option>
-                </select>
-                {selectedStatus !== selectedOrder.order_status && (
-                  <button
-                    onClick={handleUpdateStatus}
-                    disabled={saving}
-                    className="btn"
-                    style={{
-                      marginTop: '1rem',
-                      width: '100%',
-                      padding: '0.875rem',
-                      background: '#1a1512',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '12px',
-                      fontSize: '0.9375rem',
-                      fontWeight: '600',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                      opacity: saving ? 0.6 : 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.5rem'
-                    }}
-                  >
-                    <Save size={18} />
-                    {saving ? 'Saving...' : 'Save Status'}
-                  </button>
+                {currentUserRole === 'admin' ? (
+                  // ADMIN: View only
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Current Status</p>
+                      <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${getStatusConfig(selectedOrder.order_status).color}`}>
+                        {React.createElement(getStatusConfig(selectedOrder.order_status).icon, { size: 14 })}
+                        {getStatusConfig(selectedOrder.order_status).label}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">👁️ View Only</p>
+                      <p className="text-xs text-gray-600 font-medium">Admins cannot modify orders</p>
+                    </div>
+                  </div>
+                ) : selectedOrder.order_status === 'delivered' ? (
+                  // SELLER: Delivered orders cannot be changed
+                  <div className="bg-gradient-to-r from-emerald-50 to-green-50 p-5 rounded-xl flex items-center justify-between">
+                    <span className="font-medium text-gray-900">
+                      Delivered (Cannot be changed)
+                    </span>
+                    <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 bg-emerald-100 text-emerald-700 border-emerald-200">
+                      <CheckCircle size={14} />
+                      Delivered
+                    </span>
+                  </div>
+                ) : (
+                  // SELLER: Can update status
+                  <>
+                    <select
+                      value={selectedStatus}
+                      onChange={(e) => setSelectedStatus(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl font-medium text-gray-900 bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="processing">Processing</option>
+                      <option value="shipped">Shipped</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                    {selectedStatus !== selectedOrder.order_status && (
+                      <button
+                        onClick={handleUpdateStatus}
+                        disabled={saving}
+                        className="mt-3 w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                      >
+                        <Save size={18} />
+                        {saving ? 'Saving...' : 'Save Status'}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
 
+              {/* Payment Status - Only for COD */}
+              {selectedOrder.payment_method === 'cod' && (
+                <div>
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+                    Payment Status (COD)
+                  </h3>
+                  {currentUserRole === 'admin' ? (
+                    // ADMIN: View only
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
+                      <div>
+                        <p className="text-sm text-gray-600 mb-1">Current Payment Status</p>
+                        <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${getPaymentStatusConfig(selectedOrder.payment_status).color}`}>
+                          {getPaymentStatusConfig(selectedOrder.payment_status).label}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500 mb-1">👁️ View Only</p>
+                        <p className="text-xs text-gray-600 font-medium">Admins cannot modify payment</p>
+                      </div>
+                    </div>
+                  ) : (
+                    // SELLER: Can update
+                    <>
+                      <select
+                        value={selectedPaymentStatus}
+                        onChange={(e) => setSelectedPaymentStatus(e.target.value)}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl font-medium text-gray-900 bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="paid">Paid</option>
+                      </select>
+                      {selectedPaymentStatus !== selectedOrder.payment_status && (
+                        <button
+                          onClick={handleUpdatePaymentStatus}
+                          disabled={saving}
+                          className="mt-3 w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                        >
+                          <DollarSign size={18} />
+                          {saving ? 'Saving...' : 'Save Payment Status'}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Tracking Number */}
-              <div style={{ marginBottom: '2rem' }}>
-                <h3 style={{
-                  fontFamily: 'Inter',
-                  fontSize: '0.8125rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: '600',
-                  color: '#6b635a',
-                  marginBottom: '1rem'
-                }}>
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
                   Tracking Number
                 </h3>
-                {editingTracking ? (
+                {currentUserRole === 'admin' ? (
+                  // ADMIN: View only
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Tracking Number</p>
+                      <p className="font-medium text-gray-900">
+                        {selectedOrder.tracking_number || 'No tracking number'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">👁️ View Only</p>
+                      <p className="text-xs text-gray-600 font-medium">Admins cannot modify tracking</p>
+                    </div>
+                  </div>
+                ) : editingTracking ? (
+                  // SELLER: Editing mode
                   <div>
                     <input
                       type="text"
                       value={trackingNumber}
                       onChange={(e) => setTrackingNumber(e.target.value)}
                       placeholder="Enter tracking number"
-                      style={{
-                        width: '100%',
-                        padding: '0.875rem 1rem',
-                        border: '2px solid #e5e7eb',
-                        borderRadius: '12px',
-                        fontSize: '0.9375rem',
-                        fontWeight: '500',
-                        color: '#1a1512',
-                        background: 'white',
-                        transition: 'border-color 0.2s'
-                      }}
-                      onFocus={(e) => e.target.style.borderColor = '#1a1512'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl font-medium text-gray-900 bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
                     />
-                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                    <div className="flex gap-3 mt-3">
                       <button
                         onClick={handleUpdateTracking}
                         disabled={saving || !trackingNumber.trim()}
-                        className="btn"
-                        style={{
-                          flex: 1,
-                          padding: '0.875rem',
-                          background: '#1a1512',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '12px',
-                          fontSize: '0.9375rem',
-                          fontWeight: '600',
-                          cursor: (saving || !trackingNumber.trim()) ? 'not-allowed' : 'pointer',
-                          opacity: (saving || !trackingNumber.trim()) ? 0.6 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.5rem'
-                        }}
+                        className="flex-1 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                       >
                         <Save size={18} />
                         {saving ? 'Saving...' : 'Save'}
@@ -544,56 +551,21 @@ const SellerOrderManagement = () => {
                           setEditingTracking(false);
                           setTrackingNumber(selectedOrder.tracking_number || '');
                         }}
-                        className="btn"
-                        style={{
-                          flex: 1,
-                          padding: '0.875rem',
-                          background: 'white',
-                          color: '#6b635a',
-                          border: '2px solid #e5e7eb',
-                          borderRadius: '12px',
-                          fontSize: '0.9375rem',
-                          fontWeight: '600',
-                          cursor: 'pointer'
-                        }}
+                        className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border-2 border-gray-200 py-3 rounded-xl font-bold transition-all duration-300"
                       >
                         Cancel
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div style={{
-                    background: '#f9fafb',
-                    padding: '1.5rem',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <span style={{
-                      fontFamily: 'Inter',
-                      fontSize: '0.9375rem',
-                      fontWeight: '500',
-                      color: '#1a1512'
-                    }}>
+                  // SELLER: Display mode with edit button
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl flex justify-between items-center">
+                    <span className="font-medium text-gray-900">
                       {selectedOrder.tracking_number || 'No tracking number'}
                     </span>
                     <button
                       onClick={() => setEditingTracking(true)}
-                      className="btn"
-                      style={{
-                        padding: '0.5rem 1rem',
-                        background: 'white',
-                        color: '#1a1512',
-                        border: '2px solid #e5e7eb',
-                        borderRadius: '8px',
-                        fontSize: '0.875rem',
-                        fontWeight: '500',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem'
-                      }}
+                      className="bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-200 px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2"
                     >
                       <Edit2 size={14} />
                       Edit
@@ -604,46 +576,27 @@ const SellerOrderManagement = () => {
 
               {/* Order Summary */}
               <div>
-                <h3 style={{
-                  fontFamily: 'Inter',
-                  fontSize: '0.8125rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: '600',
-                  color: '#6b635a',
-                  marginBottom: '1rem'
-                }}>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
                   Order Summary
                 </h3>
-                <div style={{
-                  background: '#f9fafb',
-                  padding: '1.5rem',
-                  borderRadius: '8px',
-                  fontFamily: 'Inter',
-                  fontSize: '0.9375rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: '#6b635a' }}>
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl space-y-3">
+                  <div className="flex justify-between text-gray-700">
                     <span>Subtotal</span>
-                    <span>{formatCurrency(selectedOrder.subtotal)}</span>
+                    <span className="font-medium">{formatCurrency(selectedOrder.subtotal)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: '#6b635a' }}>
+                  <div className="flex justify-between text-gray-700">
                     <span>Tax</span>
-                    <span>{formatCurrency(selectedOrder.tax)}</span>
+                    <span className="font-medium">{formatCurrency(selectedOrder.tax)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: '#6b635a' }}>
+                  <div className="flex justify-between text-gray-700">
                     <span>Shipping</span>
-                    <span>{formatCurrency(selectedOrder.shipping_fee)}</span>
+                    <span className="font-medium">{formatCurrency(selectedOrder.shipping_fee)}</span>
                   </div>
-                  <div style={{
-                    borderTop: '2px solid #e5e7eb',
-                    marginTop: '1rem',
-                    paddingTop: '1rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontWeight: '700',
-                    fontSize: '1.125rem',
-                    color: '#1a1512'
-                  }}>
+                  <div className="flex justify-between text-gray-700">
+                    <span>Payment Method</span>
+                    <span className="font-bold uppercase">{selectedOrder.payment_method}</span>
+                  </div>
+                  <div className="border-t-2 border-amber-200 pt-3 flex justify-between text-xl font-bold text-gray-900">
                     <span>Total</span>
                     <span>{formatCurrency(selectedOrder.total_amount)}</span>
                   </div>

@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'http://localhost:5000/api';
 
 const CheckoutPage = ({ userId }) => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   // Form data
   const [shippingInfo, setShippingInfo] = useState({
@@ -63,7 +65,7 @@ const CheckoutPage = ({ userId }) => {
 
   const calculateTax = () => {
     const subtotal = parseFloat(calculateSubtotal());
-    return (subtotal * 0.12).toFixed(2); // 12% tax
+    return (subtotal * 0.12).toFixed(2);
   };
 
   const calculateTotal = () => {
@@ -74,7 +76,6 @@ const CheckoutPage = ({ userId }) => {
 
   const handleShippingSubmit = (e) => {
     e.preventDefault();
-    // Validate shipping info
     if (!shippingInfo.fullName || !shippingInfo.email || !shippingInfo.phone || !shippingInfo.address) {
       alert('Please fill in all required fields');
       return;
@@ -82,20 +83,107 @@ const CheckoutPage = ({ userId }) => {
     setCurrentStep(2);
   };
 
-  const handlePaymentSubmit = () => {
+  const handlePaymentSubmit = async () => {
     if (!paymentMethod) {
       alert('Please select a payment method');
       return;
     }
-    // Process order
-    processOrder();
+
+    // Check minimum amount for online payments
+    const total = parseFloat(calculateTotal());
+    if ((paymentMethod === 'gcash' || paymentMethod === 'card') && total < 100) {
+      alert('Minimum order amount for GCash and Card payment is ₱100.00. Please use Cash on Delivery or add more items to your cart.');
+      return;
+    }
+
+    // If Cash on Delivery, process order directly
+    if (paymentMethod === 'cod') {
+      processOrder();
+      return;
+    }
+
+    // For GCash and Card payments, initiate PayMongo payment
+    await initiatePayMongoPayment();
   };
 
-  const processOrder = async () => {
+  const initiatePayMongoPayment = async () => {
+    try {
+      setProcessingPayment(true);
+      
+      const totalAmount = Math.round(parseFloat(calculateTotal()) * 100); // Convert to centavos
+
+      // Validate minimum amount (10000 centavos = ₱100)
+      if (totalAmount < 10000) {
+        alert('Minimum order amount for online payment is ₱100.00');
+        setProcessingPayment(false);
+        return;
+      }
+
+      // Create payment intent
+      const paymentData = {
+        amount: totalAmount,
+        payment_method: paymentMethod,
+        currency: 'PHP',
+        description: `Order for ${shippingInfo.fullName}`,
+        billing: {
+          name: shippingInfo.fullName,
+          email: shippingInfo.email,
+          phone: shippingInfo.phone,
+          address: {
+            line1: shippingInfo.address,
+            city: shippingInfo.city,
+            state: shippingInfo.province,
+            postal_code: shippingInfo.postalCode,
+            country: 'PH'
+          }
+        }
+      };
+
+      console.log('Creating payment with amount:', totalAmount, 'centavos (₱' + (totalAmount/100) + ')');
+
+      const response = await fetch(`${API_BASE_URL}/payment/create-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create payment');
+      }
+
+      const data = await response.json();
+
+      // Redirect to PayMongo checkout page
+      if (data.checkout_url) {
+        // Store order data temporarily (will be used after redirect)
+        localStorage.setItem('pendingOrder', JSON.stringify({
+          user_id: currentUserId,
+          shipping_info: shippingInfo,
+          payment_method: paymentMethod,
+          cart_items: cartItems,
+          subtotal: calculateSubtotal(),
+          tax: calculateTax(),
+          shipping_fee: 0,
+          total: calculateTotal(),
+          payment_intent_id: data.payment_intent_id
+        }));
+
+        // Redirect to PayMongo
+        window.location.href = data.checkout_url;
+      }
+
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      alert('Failed to process payment: ' + error.message);
+      setProcessingPayment(false);
+    }
+  };
+
+  const processOrder = async (paymentIntentId = null) => {
     try {
       setLoading(true);
       
-      // Prepare order data
       const orderData = {
         user_id: currentUserId,
         shipping_info: shippingInfo,
@@ -103,11 +191,12 @@ const CheckoutPage = ({ userId }) => {
         cart_items: cartItems,
         subtotal: calculateSubtotal(),
         tax: calculateTax(),
-        shipping_fee: 0, // Free shipping
+        shipping_fee: 0,
         total: calculateTotal(),
+        payment_intent_id: paymentIntentId,
+        payment_status: paymentMethod === 'cod' ? 'pending' : 'paid'
       };
 
-      // Send order to backend API
       const response = await fetch(`${API_BASE_URL}/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -121,7 +210,6 @@ const CheckoutPage = ({ userId }) => {
 
       const data = await response.json();
 
-      // Set order confirmation with data from backend
       setOrderConfirmation({
         orderNumber: data.order.order_number,
         orderId: data.order.id,
@@ -144,16 +232,146 @@ const CheckoutPage = ({ userId }) => {
     setShippingInfo(prev => ({ ...prev, [name]: value }));
   };
 
+  // Check for payment success on component mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentSuccess = urlParams.get('payment_success');
+    const paymentIntentId = urlParams.get('payment_intent_id');
+    const sourceId = urlParams.get('source_id');
+
+    console.log('=== PAYMENT REDIRECT CHECK ===');
+    console.log('URL:', window.location.href);
+    console.log('payment_success:', paymentSuccess);
+    console.log('payment_intent_id:', paymentIntentId);
+    console.log('source_id:', sourceId);
+    console.log('=============================');
+
+    if (paymentSuccess === 'true' && (paymentIntentId || sourceId)) {
+      console.log('✅ Payment success detected!');
+      
+      const pendingOrder = localStorage.getItem('pendingOrder');
+      console.log('📦 Pending order from localStorage:', pendingOrder ? 'Found' : 'Not found');
+      
+      if (pendingOrder) {
+        const orderData = JSON.parse(pendingOrder);
+        
+        console.log('📝 Order data:', orderData);
+        
+        // Set the state from stored data for UI display
+        setShippingInfo(orderData.shipping_info);
+        setPaymentMethod(orderData.payment_method);
+        setCartItems(orderData.cart_items);
+        
+        console.log('🚀 Processing order with payment ID:', paymentIntentId || sourceId);
+        
+        // Process the order using the data from localStorage directly
+        // Don't rely on state updates as they're async
+        processOrderWithData(orderData, paymentIntentId || sourceId);
+        
+        // Clear pending order
+        localStorage.removeItem('pendingOrder');
+        console.log('🧹 Cleared pending order from localStorage');
+        
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else {
+        console.error('❌ No pending order found in localStorage!');
+        alert('Payment successful, but order data was lost. Please contact support with your payment confirmation.');
+      }
+    }
+  }, []);
+
+  // New function to process order with data directly from localStorage
+  const processOrderWithData = async (orderData, paymentIntentId) => {
+    try {
+      setLoading(true);
+      
+      // If this is a GCash source, create the payment in PayMongo first
+      if (paymentIntentId && paymentIntentId.startsWith('src_')) {
+        console.log('💳 Creating PayMongo payment from GCash source:', paymentIntentId);
+        try {
+          const paymentResponse = await fetch(`${API_BASE_URL}/payment/create-payment-from-source`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: paymentIntentId })
+          });
+          
+          if (paymentResponse.ok) {
+            const paymentData = await paymentResponse.json();
+            console.log('✅ PayMongo payment created:', paymentData.payment_id);
+          } else {
+            console.warn('⚠️ Could not create PayMongo payment, but order will still be created');
+          }
+        } catch (error) {
+          console.warn('⚠️ PayMongo payment creation failed:', error.message);
+          // Continue with order creation even if PayMongo payment fails
+        }
+      }
+      
+      const requestData = {
+        user_id: orderData.user_id,
+        shipping_info: orderData.shipping_info,
+        payment_method: orderData.payment_method,
+        cart_items: orderData.cart_items,
+        subtotal: orderData.subtotal,
+        tax: orderData.tax,
+        shipping_fee: orderData.shipping_fee || 0,
+        total: orderData.total,
+        payment_intent_id: paymentIntentId,
+        payment_status: orderData.payment_method === 'cod' ? 'pending' : 'paid'
+      };
+
+      console.log('📤 Sending order request:', requestData);
+
+      const response = await fetch(`${API_BASE_URL}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Order creation failed:', errorData);
+        throw new Error(errorData.error || 'Failed to process order');
+      }
+
+      const data = await response.json();
+
+      console.log('✅ Order created successfully:', data.order.order_number);
+
+      setOrderConfirmation({
+        orderNumber: data.order.order_number,
+        orderId: data.order.id,
+        date: new Date(data.order.order_date).toLocaleDateString(),
+        ...requestData
+      });
+
+      setCurrentStep(4);
+      setLoading(false);
+
+    } catch (error) {
+      console.error('❌ Error processing order:', error);
+      alert('Failed to create order. Please contact support. Error: ' + error.message);
+      setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-gray-200 border-t-green-500 rounded-full animate-spin mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading checkout...</p>
+          <p className="mt-4 text-gray-600">
+            {processingPayment ? 'Processing payment...' : 'Loading checkout...'}
+          </p>
         </div>
       </div>
     );
   }
+
+  // Check if cart total meets minimum for online payment
+  const total = parseFloat(calculateTotal());
+  const meetsMinimum = total >= 100;
 
   return (
     <div className="min-h-screen bg-white">
@@ -455,12 +673,33 @@ const CheckoutPage = ({ userId }) => {
           <div className="max-w-2xl mx-auto">
             <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Select Payment Method</h2>
 
+            {/* Minimum Amount Warning */}
+            {!meetsMinimum && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <div className="flex gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-semibold text-yellow-800">Minimum Amount Required</p>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      Your cart total (₱{calculateTotal()}) is below the ₱100.00 minimum for GCash and Card payments. 
+                      Please use Cash on Delivery or add more items to your cart.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 mb-8">
               {/* GCash */}
               <button
                 onClick={() => setPaymentMethod('gcash')}
+                disabled={!meetsMinimum}
                 className={`w-full p-6 rounded-lg border-2 transition-all ${
-                  paymentMethod === 'gcash'
+                  !meetsMinimum 
+                    ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
+                    : paymentMethod === 'gcash'
                     ? 'border-green-500 bg-green-50'
                     : 'border-gray-200 hover:border-green-300'
                 }`}
@@ -471,9 +710,12 @@ const CheckoutPage = ({ userId }) => {
                   </div>
                   <div className="text-left flex-1">
                     <h3 className="font-bold text-gray-900 text-lg">GCash</h3>
-                    <p className="text-sm text-gray-600">Pay securely with your GCash account</p>
+                    <p className="text-sm text-gray-600">
+                      Pay securely with your GCash account
+                      {!meetsMinimum && <span className="block text-red-600 font-medium mt-1">Minimum ₱100.00 required</span>}
+                    </p>
                   </div>
-                  {paymentMethod === 'gcash' && (
+                  {paymentMethod === 'gcash' && meetsMinimum && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
@@ -481,30 +723,38 @@ const CheckoutPage = ({ userId }) => {
                 </div>
               </button>
 
-              {/* PayPal */}
-              <button
-                onClick={() => setPaymentMethod('paypal')}
+              {/* Card Payment */}
+              {/* <button
+                onClick={() => setPaymentMethod('card')}
+                disabled={!meetsMinimum}
                 className={`w-full p-6 rounded-lg border-2 transition-all ${
-                  paymentMethod === 'paypal'
+                  !meetsMinimum
+                    ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
+                    : paymentMethod === 'card'
                     ? 'border-green-500 bg-green-50'
                     : 'border-gray-200 hover:border-green-300'
                 }`}
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <span className="text-white font-bold text-xl">P</span>
+                  <div className="w-16 h-16 bg-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
                   </div>
                   <div className="text-left flex-1">
-                    <h3 className="font-bold text-gray-900 text-lg">PayPal</h3>
-                    <p className="text-sm text-gray-600">Pay with your PayPal account</p>
+                    <h3 className="font-bold text-gray-900 text-lg">Credit/Debit Card</h3>
+                    <p className="text-sm text-gray-600">
+                      Pay with Visa, Mastercard, or other cards
+                      {!meetsMinimum && <span className="block text-red-600 font-medium mt-1">Minimum ₱100.00 required</span>}
+                    </p>
                   </div>
-                  {paymentMethod === 'paypal' && (
+                  {paymentMethod === 'card' && meetsMinimum && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
                 </div>
-              </button>
+              </button> */}
 
               {/* Cash on Delivery */}
               <button
@@ -534,6 +784,20 @@ const CheckoutPage = ({ userId }) => {
               </button>
             </div>
 
+            {/* Security Notice */}
+            {(paymentMethod === 'gcash' || paymentMethod === 'card') && meetsMinimum && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <div className="flex gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm text-blue-800">
+                    You will be redirected to a secure payment page to complete your transaction.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Order Summary */}
             <div className="bg-gray-50 rounded-lg p-6 mb-6">
               <div className="flex justify-between items-center mb-2">
@@ -551,10 +815,10 @@ const CheckoutPage = ({ userId }) => {
               </button>
               <button
                 onClick={handlePaymentSubmit}
-                disabled={!paymentMethod}
+                disabled={!paymentMethod || processingPayment}
                 className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
-                Complete Order
+                {processingPayment ? 'Processing...' : 'Complete Order'}
               </button>
             </div>
           </div>
@@ -602,9 +866,9 @@ const CheckoutPage = ({ userId }) => {
             </div>
 
             <div className="space-y-3">
-              <p className="text-gray-600">
+              {/* <p className="text-gray-600">
                 A confirmation email has been sent to <span className="font-medium">{shippingInfo.email}</span>
-              </p>
+              </p> */}
               <button
                 onClick={() => navigate('/buyer/products')}
                 className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg"

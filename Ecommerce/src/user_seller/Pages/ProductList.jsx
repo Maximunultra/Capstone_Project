@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom'; // Add this import
+import { useNavigate } from 'react-router-dom';
 import ProductForm from '../Components/ProductForm';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
 const ProductListPage = ({ userId, userRole }) => {
-  const navigate = useNavigate(); // Add this hook
+  const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -25,11 +25,9 @@ const ProductListPage = ({ userId, userRole }) => {
     total: 0
   });
 
-  // Get userId from localStorage if not passed as prop
+  // Get userId and userRole from localStorage if not passed as prop
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
   const currentUserRole = userRole || JSON.parse(localStorage.getItem('user') || '{}').role;
-
-  // ... (rest of your existing functions: fetchProducts, handleSearch, etc.)
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -39,6 +37,11 @@ const ProductListPage = ({ userId, userRole }) => {
       const params = new URLSearchParams();
       params.append('limit', pagination.limit);
       params.append('offset', pagination.offset);
+      
+      // IMPORTANT: If seller is logged in, only fetch THEIR products
+      if (currentUserRole === 'seller' && currentUserId) {
+        params.append('seller_id', currentUserId);
+      }
       
       if (filters.search) params.append('search', filters.search);
       if (filters.category) params.append('category', filters.category);
@@ -81,6 +84,15 @@ const ProductListPage = ({ userId, userRole }) => {
   };
 
   const handleDelete = async (productId) => {
+    // Sellers can only delete their own products
+    if (currentUserRole === 'seller') {
+      const product = products.find(p => p.id === productId);
+      if (product && product.users && product.users.id !== currentUserId) {
+        alert('You can only delete your own products!');
+        return;
+      }
+    }
+
     if (!window.confirm('Are you sure you want to delete this product?')) {
       return;
     }
@@ -106,6 +118,12 @@ const ProductListPage = ({ userId, userRole }) => {
   };
 
   const handleApprove = async (productId) => {
+    // Only admin can approve
+    if (currentUserRole !== 'admin') {
+      alert('Only admins can approve products!');
+      return;
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/approve`, {
         method: 'PATCH',
@@ -127,6 +145,12 @@ const ProductListPage = ({ userId, userRole }) => {
   };
 
   const handleReject = async (productId) => {
+    // Only admin can reject
+    if (currentUserRole !== 'admin') {
+      alert('Only admins can reject products!');
+      return;
+    }
+
     const reason = prompt('Enter rejection reason:');
     if (!reason) return;
 
@@ -170,14 +194,26 @@ const ProductListPage = ({ userId, userRole }) => {
     return (price - (price * discount / 100)).toFixed(2);
   };
 
+  // Check if user can edit/delete a specific product
+  const canModifyProduct = (product) => {
+    if (currentUserRole === 'admin') {
+      return false; // Admin CANNOT edit/delete products
+    }
+    if (currentUserRole === 'seller') {
+      // Seller can only modify their own products
+      return product.users && product.users.id === currentUserId;
+    }
+    return false;
+  };
+
   // If showing add form, display that instead
   if (showAddForm) {
     return (
-      <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
         <div className="max-w-4xl mx-auto">
           <button
             onClick={() => setShowAddForm(false)}
-            className="mb-4 flex items-center text-gray-600 hover:text-gray-900 transition"
+            className="mb-4 flex items-center text-amber-700 hover:text-amber-900 transition-colors duration-300 font-medium"
           >
             <span className="mr-2">←</span> Back to Products
           </button>
@@ -195,28 +231,44 @@ const ProductListPage = ({ userId, userRole }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Products</h1>
-            <p className="text-gray-600">Manage product listings</p>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-2">
+              {currentUserRole === 'seller' ? 'My Products' : 'Product Management'}
+            </h1>
+            <p className="text-gray-600">
+              {currentUserRole === 'seller' 
+                ? 'Manage your product listings' 
+                : 'Review and approve product listings'}
+            </p>
           </div>
           
-          {(currentUserRole === 'seller' || currentUserRole === 'admin') && (
+          {/* ONLY SELLERS can see "Add Product" button */}
+          {currentUserRole === 'seller' && (
             <button
               onClick={() => setShowAddForm(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+              className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
             >
               <span className="text-xl">+</span>
               Add New Product
             </button>
           )}
+
+          {/* Admin sees a different message */}
+          {currentUserRole === 'admin' && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-6 py-3">
+              <p className="text-sm text-blue-800 font-medium">
+                👁️ View Only Mode - Approve/Reject Products
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Filters Section - keeping your existing filter code */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+        {/* Filters Section */}
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Filters</h2>
           
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -228,7 +280,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 value={filters.search}
                 onChange={handleFilterChange}
                 placeholder="Search products..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
               />
             </div>
 
@@ -240,7 +292,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 value={filters.category}
                 onChange={handleFilterChange}
                 placeholder="Category"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
               />
             </div>
 
@@ -252,7 +304,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 value={filters.minPrice}
                 onChange={handleFilterChange}
                 placeholder="0"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
               />
             </div>
 
@@ -264,7 +316,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 value={filters.maxPrice}
                 onChange={handleFilterChange}
                 placeholder="999"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
               />
             </div>
 
@@ -274,7 +326,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 name="isActive"
                 value={filters.isActive}
                 onChange={handleFilterChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
               >
                 <option value="all">All</option>
                 <option value="true">Active</option>
@@ -289,7 +341,7 @@ const ProductListPage = ({ userId, userRole }) => {
                   name="approvalStatus"
                   value={filters.approvalStatus}
                   onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
                 >
                   <option value="all">All</option>
                   <option value="pending">Pending</option>
@@ -300,10 +352,10 @@ const ProductListPage = ({ userId, userRole }) => {
             )}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 flex gap-2">
             <button
               onClick={handleSearch}
-              className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition"
+              className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-6 py-2 rounded-xl transition-all duration-300 font-medium shadow-md hover:shadow-lg"
             >
               Apply Filters
             </button>
@@ -321,7 +373,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 setPagination(prev => ({ ...prev, offset: 0 }));
                 setTimeout(fetchProducts, 100);
               }}
-              className="ml-2 bg-gray-200 text-gray-700 px-6 py-2 rounded-md hover:bg-gray-300 transition"
+              className="bg-gray-200 text-gray-700 px-6 py-2 rounded-xl hover:bg-gray-300 transition-all duration-300 font-medium"
             >
               Clear
             </button>
@@ -330,13 +382,13 @@ const ProductListPage = ({ userId, userRole }) => {
 
         {loading && (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div>
             <p className="mt-4 text-gray-600">Loading products...</p>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
             <p className="text-red-700">Error: {error}</p>
           </div>
         )}
@@ -344,8 +396,13 @@ const ProductListPage = ({ userId, userRole }) => {
         {!loading && !error && (
           <>
             {products.length === 0 ? (
-              <div className="bg-white rounded-lg shadow-md p-12 text-center">
-                <p className="text-gray-600 text-lg">No products found</p>
+              <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-12 text-center">
+                <div className="text-6xl mb-4">📦</div>
+                <p className="text-gray-600 text-lg font-medium">
+                  {currentUserRole === 'seller' 
+                    ? 'No products found. Start by adding your first product!' 
+                    : 'No products found'}
+                </p>
                 <p className="text-gray-500 mt-2">Try adjusting your filters</p>
               </div>
             ) : (
@@ -353,7 +410,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 {products.map((product) => (
                   <div 
                     key={product.id} 
-                    className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300"
+                    className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:scale-105"
                   >
                     {/* Product Image with badges and hover actions */}
                     <div className="relative h-40 bg-gray-200 overflow-hidden group">
@@ -369,20 +426,13 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {/* Quick Action Icons */}
-                      {(currentUserRole === 'admin' || (product.users && product.users.id === currentUserId)) && (
+                      {/* Quick Action Icons - ONLY for sellers on their own products */}
+                      {canModifyProduct(product) && (
                         <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              // Navigate to edit page based on user role
-                              if (currentUserRole === 'admin') {
-                                navigate(`/admin/products/${product.id}/edit`);
-                              } else if (currentUserRole === 'seller') {
-                                navigate(`/seller/products/${product.id}/edit`);
-                              } else {
-                                navigate(`/buyer/products/${product.id}/edit`);
-                              }
+                              navigate(`/seller/products/${product.id}/edit`);
                             }}
                             className="bg-white/95 backdrop-blur-sm hover:bg-blue-500 text-blue-600 hover:text-white p-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-110"
                             title="Edit Product"
@@ -433,7 +483,7 @@ const ProductListPage = ({ userId, userRole }) => {
                             ❌ Rejected
                           </span>
                         )}
-                        {product.approval_status === 'approved' && currentUserRole === 'admin' && (
+                        {product.approval_status === 'approved' && (
                           <span className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded text-[10px]">
                             ✓ Approved
                           </span>
@@ -493,12 +543,13 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {product.users && (
-                        <div className="text-[10px] text-gray-500 mb-2 border-t pt-1 hidden sm:block">
+                      {product.users && currentUserRole === 'admin' && (
+                        <div className="text-[10px] text-gray-500 mb-2 border-t pt-1">
                           Seller: {product.users.full_name}
                         </div>
                       )}
 
+                      {/* ADMIN ONLY: Approve/Reject Buttons */}
                       {currentUserRole === 'admin' && product.approval_status === 'pending' && (
                         <div className="mb-2">
                           <div className="flex gap-1.5">
@@ -530,10 +581,9 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {/* FIXED: View Details Button - Navigate within layout */}
+                      {/* View Details Button */}
                       <button
                         onClick={() => {
-                          // Navigate based on user role to keep sidebar
                           if (currentUserRole === 'admin') {
                             navigate(`/admin/products/${product.id}`);
                           } else if (currentUserRole === 'seller') {
@@ -542,7 +592,7 @@ const ProductListPage = ({ userId, userRole }) => {
                             navigate(`/buyer/products/${product.id}`);
                           }
                         }}
-                        className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-2.5 px-3 rounded-lg transition-all duration-200 text-sm font-semibold shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                        className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2.5 px-3 rounded-xl transition-all duration-300 text-sm font-semibold shadow-md hover:shadow-lg flex items-center justify-center gap-2"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
@@ -564,7 +614,7 @@ const ProductListPage = ({ userId, userRole }) => {
 
             {/* Pagination */}
             {products.length > 0 && (
-              <div className="mt-8 flex items-center justify-between bg-white rounded-lg shadow-md p-4">
+              <div className="mt-8 flex items-center justify-between bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4">
                 <div className="text-sm text-gray-600">
                   Showing {pagination.offset + 1} - {Math.min(pagination.offset + pagination.limit, pagination.total)} of {pagination.total} products
                 </div>
@@ -573,14 +623,14 @@ const ProductListPage = ({ userId, userRole }) => {
                   <button
                     onClick={prevPage}
                     disabled={pagination.offset === 0}
-                    className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    className="px-4 py-2 border-2 border-gray-300 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
                   >
                     Previous
                   </button>
                   <button
                     onClick={nextPage}
                     disabled={pagination.offset + pagination.limit >= pagination.total}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
                   >
                     Next
                   </button>

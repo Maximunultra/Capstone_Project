@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 const API_BASE_URL = 'http://localhost:5000/api';
@@ -7,6 +7,9 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
   const navigate = useNavigate();
   const [cartCount, setCartCount] = useState(0);
   const [userId, setUserId] = useState(null);
+  const [userName, setUserName] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     // Get user from localStorage
@@ -14,6 +17,7 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
     if (user) {
       const userData = JSON.parse(user);
       setUserId(userData.id);
+      setUserName(userData.full_name || userData.name || 'User');
       
       // Fetch cart count if user is a buyer
       if (userData.role === 'buyer') {
@@ -25,6 +29,18 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
       }
     }
   }, [isAuthenticated]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const fetchCartCount = async (uid) => {
     try {
@@ -42,6 +58,8 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
     localStorage.removeItem('user');
     setCartCount(0);
     setUserId(null);
+    setUserName('');
+    setShowDropdown(false);
     if (onAuthChange) {
       onAuthChange(false, null, null);
     }
@@ -57,6 +75,15 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
     navigate('/buyer/cart');
   };
 
+  const handleProfileClick = () => {
+    setShowDropdown(false);
+    navigate('/buyer/profile');
+  };
+
+  const toggleDropdown = () => {
+    setShowDropdown(!showDropdown);
+  };
+
   return (
     <div className="min-h-screen bg-[#f8f5f1] flex flex-col">
       {/* Top Navigation */}
@@ -69,9 +96,9 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
           <Link to="/buyer/products" className="text-[#5c5042] hover:text-[#c08a4b] font-medium transition">
             Products
           </Link>
-          <Link to="/buyer/about" className="text-[#5c5042] hover:text-[#c08a4b] font-medium transition">
+          {/* <Link to="/buyer/about" className="text-[#5c5042] hover:text-[#c08a4b] font-medium transition">
             About
-          </Link>
+          </Link> */}
         </div>
         <div className="flex items-center gap-6">
           <button className="text-[#5c5042] hover:text-[#c08a4b] transition">
@@ -97,15 +124,49 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
           
           {isAuthenticated ? (
             <div className="flex items-center gap-4">
-              <span className="text-sm text-[#5c5042]">
-                Welcome, <span className="font-semibold">{userRole}</span>
-              </span>
-              <button 
-                onClick={handleSignOut}
-                className="bg-[#a48a6d] text-white px-5 py-2 rounded shadow font-medium hover:bg-[#c08a4b] transition"
-              >
-                Sign Out
-              </button>
+              {/* User Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={toggleDropdown}
+                  className="flex items-center gap-2 text-sm text-[#5c5042] hover:text-[#c08a4b] transition"
+                >
+                  <span className="font-semibold">Welcome, {userName}</span>
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    className={`h-4 w-4 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Dropdown Menu */}
+                {showDropdown && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+                    <button
+                      onClick={handleProfileClick}
+                      className="w-full text-left px-4 py-2 text-sm text-[#5c5042] hover:bg-gray-100 transition flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Profile
+                    </button>
+                    <div className="border-t border-gray-200 my-1"></div>
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <Link to="/login">
@@ -134,7 +195,7 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
             <ul className="space-y-2">
               <li><Link to="/buyer" className="text-gray-300 hover:text-[#c08a4b] transition">Home</Link></li>
               <li><Link to="/buyer/products" className="text-gray-300 hover:text-[#c08a4b] transition">Products</Link></li>
-              <li><Link to="/buyer/about" className="text-gray-300 hover:text-[#c08a4b] transition">About</Link></li>
+              {/* <li><Link to="/buyer/about" className="text-gray-300 hover:text-[#c08a4b] transition">About</Link></li> */}
             </ul>
           </div>
           <div>
