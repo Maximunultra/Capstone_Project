@@ -16,6 +16,7 @@ export { supabase };
 app.use(cors());
 app.use(express.json());
 
+// Import routes
 import authRoutes from "./routes/auth.js";
 import usersRoutes from "./routes/users.js";
 import productRoutes from "./routes/products.js";
@@ -23,8 +24,12 @@ import promotionRoutes from "./routes/promotions.js";
 import cartRoutes from "./routes/cart.js";
 import orderRoutes from "./routes/orders.js";
 import analyticsRoutes from "./routes/analytics.js";
+import paymentRoutes from "./routes/payment.js";
+import messageRoutes from "./routes/messages.js"; // NEW: Message routes
+import feedbackRoutes from './routes/feedback.js';
 
 // Routes
+app.use('/api/feedback', feedbackRoutes);
 app.use("/api/analytics", analyticsRoutes);  
 app.use("/api/orders", orderRoutes);
 app.use("/api/cart", cartRoutes);
@@ -32,6 +37,8 @@ app.use("/api/products", productRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/promotions", promotionRoutes);
+app.use("/api/payment", paymentRoutes);
+app.use("/api/messages", messageRoutes); // NEW: Message routes
 // Email transporter setup
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -109,7 +116,12 @@ async function cleanupExpiredOTPs() {
 app.get('/', (req, res) => {
   res.json({ 
     message: 'ECommerce Email Service Running!',
-    status: 'active'
+    status: 'active',
+    features: {
+      email: 'enabled',
+      payments: 'enabled',
+      paymongo: process.env.PAYMONGO_SECRET_KEY ? 'configured' : 'not configured'
+    }
   });
 });
 
@@ -417,12 +429,19 @@ app.post('/reset-password', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
-    service: 'email',
-    timestamp: new Date().toISOString()
+    service: 'ecommerce-api',
+    timestamp: new Date().toISOString(),
+    features: {
+      email: transporter ? 'ready' : 'unavailable',
+      payments: process.env.PAYMONGO_SECRET_KEY ? 'configured' : 'not configured'
+    }
   });
 });
 
 // Start the Server
 app.listen(port, () => {
   console.log(`✅ Server running on http://localhost:${port}`);
+  console.log(`📧 Email service: ${process.env.EMAIL_USER ? 'configured' : 'not configured'}`);
+  console.log(`💳 PayMongo: ${process.env.PAYMONGO_SECRET_KEY ? 'configured' : 'not configured'}`);
+  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
 });
