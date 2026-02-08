@@ -102,11 +102,25 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     console.log('📝 User registration request received');
-    const { full_name, email, password, role, phone, address, profile_image } = req.body;
+    const { full_name, email, password, role, phone, address, profile_image, proof_document } = req.body;
     
     if (!full_name || !email || !password || !role) {
       return res.status(400).json({ 
         error: "full_name, email, password, and role are required." 
+      });
+    }
+
+    // Validate role (only buyer or seller allowed)
+    if (!['buyer', 'seller'].includes(role)) {
+      return res.status(400).json({ 
+        error: "Role must be either 'buyer' or 'seller'" 
+      });
+    }
+
+    // Require proof document for sellers
+    if (role === 'seller' && !proof_document) {
+      return res.status(400).json({ 
+        error: "Barangay certificate or proof of residence is required for sellers" 
       });
     }
 
@@ -148,6 +162,8 @@ router.post("/", async (req, res) => {
       phone: phone || null,
       address: address || null,
       profile_image: profile_image || null,
+      proof_document: proof_document || null, // Add proof document field
+      approval_status: role === 'seller' ? 'pending' : 'approved', // Sellers need approval, buyers auto-approved
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -202,7 +218,7 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, email, password, role, phone, address, profile_image } = req.body;
+    const { full_name, email, password, role, phone, address, profile_image, proof_document } = req.body;
     
     const updateFields = {};
     if (full_name) updateFields.full_name = full_name;
@@ -215,10 +231,20 @@ router.put("/:id", async (req, res) => {
       console.log('✅ Password hashed for update');
     }
     
-    if (role) updateFields.role = role;
+    if (role) {
+      // Validate role
+      if (!['buyer', 'seller'].includes(role)) {
+        return res.status(400).json({ 
+          error: "Role must be either 'buyer' or 'seller'" 
+        });
+      }
+      updateFields.role = role;
+    }
+    
     if (phone !== undefined) updateFields.phone = phone;
     if (address !== undefined) updateFields.address = address;
     if (profile_image !== undefined) updateFields.profile_image = profile_image;
+    if (proof_document !== undefined) updateFields.proof_document = proof_document;
 
     // Add updated timestamp
     updateFields.updated_at = new Date().toISOString();
@@ -248,10 +274,10 @@ router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     
-    // First, get the user to check if they have a profile image
+    // First, get the user to check if they have a profile image or proof document
     const { data: user } = await supabase
       .from("users")
-      .select("profile_image")
+      .select("profile_image, proof_document")
       .eq("id", id)
       .single();
 
@@ -276,10 +302,71 @@ router.delete("/:id", async (req, res) => {
       }
     }
 
+    // If user had a proof document, delete it from storage
+    if (user && user.proof_document) {
+      try {
+        const documentPath = user.proof_document.split('/').pop();
+        await supabase.storage
+          .from('user-profile-images')
+          .remove([`profiles/${documentPath}`]);
+      } catch (storageError) {
+        console.error('Error deleting proof document:', storageError);
+        // Don't fail the entire operation if document deletion fails
+      }
+    }
+
     console.log('✅ User deleted successfully');
     res.json({ message: "User deleted successfully" });
   } catch (error) {
     console.error('❌ User deletion error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Approve or reject a seller
+router.patch("/:id/approval", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approval_status } = req.body;
+
+    // Validate approval status
+    if (!['approved', 'rejected', 'pending'].includes(approval_status)) {
+      return res.status(400).json({ 
+        error: "approval_status must be 'approved', 'rejected', or 'pending'" 
+      });
+    }
+
+    // Get the user first to check if they're a seller
+    const { data: user, error: fetchError } = await supabase
+      .from("users")
+      .select("role, approval_status")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Update approval status
+    const { data, error } = await supabase
+      .from("users")
+      .update({ 
+        approval_status,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ User ${approval_status} successfully`);
+
+    // Don't return the password hash in the response
+    const { password_hash, ...userResponse } = data;
+    res.json(userResponse);
+  } catch (error) {
+    console.error('❌ Approval update error:', error);
     res.status(500).json({ error: error.message });
   }
 });
