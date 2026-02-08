@@ -9,6 +9,7 @@ const generateOrderNumber = () => {
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `ORD-${timestamp}-${random}`;
 };
+
 router.get("/", async (req, res) => {
   try {
     const { status, limit = 50, offset = 0, sort = 'desc' } = req.query;
@@ -26,7 +27,8 @@ router.get("/", async (req, res) => {
             product_name,
             product_image,
             category,
-            brand
+            brand,
+            user_id
           )
         )
       `)
@@ -133,7 +135,9 @@ router.post("/", async (req, res) => {
       subtotal,
       tax,
       shipping_fee,
-      total
+      total,
+      payment_intent_id,
+      payment_status
     } = req.body;
 
     // Validation
@@ -146,6 +150,17 @@ router.post("/", async (req, res) => {
 
     // Generate order number
     const orderNumber = generateOrderNumber();
+
+    // Determine payment status based on payment method
+    let finalPaymentStatus = payment_status || 'pending';
+    
+    if ((payment_method === 'gcash' || payment_method === 'card') && payment_intent_id) {
+      finalPaymentStatus = 'paid';
+    }
+    
+    if (payment_method === 'cod') {
+      finalPaymentStatus = 'pending';
+    }
 
     // Create order
     const orderData = {
@@ -169,7 +184,8 @@ router.post("/", async (req, res) => {
       
       // Payment
       payment_method: payment_method,
-      payment_status: payment_method === 'cod' ? 'pending' : 'pending',
+      payment_status: finalPaymentStatus,
+      payment_intent_id: payment_intent_id || null,
       
       // Order status
       order_status: 'pending',
@@ -184,6 +200,10 @@ router.post("/", async (req, res) => {
     };
 
     console.log('💾 Creating order in database...');
+    console.log('Payment method:', payment_method);
+    console.log('Payment status:', finalPaymentStatus);
+    console.log('Payment intent ID:', payment_intent_id);
+
     const { data: order, error: orderError } = await supabase
       .from("orders")
       .insert([orderData])
@@ -254,7 +274,6 @@ router.post("/", async (req, res) => {
 
     if (clearCartError) {
       console.error('⚠️ Error clearing cart:', clearCartError);
-      // Don't fail the order if cart clearing fails
     } else {
       console.log('✅ Cart cleared');
     }
@@ -293,7 +312,8 @@ router.get("/user/:userId", async (req, res) => {
           product:product_id (
             id,
             product_name,
-            product_image
+            product_image,
+            user_id
           )
         )
       `)
@@ -324,7 +344,7 @@ router.get("/user/:userId", async (req, res) => {
   }
 });
 
-// GET - Fetch a single order by ID
+// GET - Fetch a single order by ID (ENHANCED with permissions)
 router.get("/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -340,7 +360,8 @@ router.get("/:orderId", async (req, res) => {
             product_name,
             product_image,
             category,
-            brand
+            brand,
+            user_id
           )
         )
       `)
@@ -354,9 +375,17 @@ router.get("/:orderId", async (req, res) => {
       });
     }
 
+    // Add permission flags based on order status
+    const orderStatus = data.order_status.toLowerCase();
+    const permissions = {
+      can_cancel: ['pending', 'processing'].includes(orderStatus),
+      can_message_seller: ['pending', 'processing', 'shipped'].includes(orderStatus)
+    };
+
     res.json({
       success: true,
-      order: data
+      order: data,
+      permissions
     });
   } catch (error) {
     console.error("❌ Error fetching order:", error);
@@ -381,7 +410,8 @@ router.get("/number/:orderNumber", async (req, res) => {
           product:product_id (
             id,
             product_name,
-            product_image
+            product_image,
+            user_id
           )
         )
       `)
@@ -395,9 +425,17 @@ router.get("/number/:orderNumber", async (req, res) => {
       });
     }
 
+    // Add permission flags
+    const orderStatus = data.order_status.toLowerCase();
+    const permissions = {
+      can_cancel: ['pending', 'processing'].includes(orderStatus),
+      can_message_seller: ['pending', 'processing', 'shipped'].includes(orderStatus)
+    };
+
     res.json({
       success: true,
-      order: data
+      order: data,
+      permissions
     });
   } catch (error) {
     console.error("❌ Error fetching order:", error);
@@ -408,11 +446,11 @@ router.get("/number/:orderNumber", async (req, res) => {
   }
 });
 
-// PATCH - Update order status
+// PATCH - Update order status (ENHANCED with validation)
 router.patch("/:orderId/status", async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { order_status } = req.body;
+    const { order_status, tracking_number } = req.body;
 
     if (!order_status) {
       return res.status(400).json({
@@ -430,17 +468,66 @@ router.patch("/:orderId/status", async (req, res) => {
       });
     }
 
+    // Check current order status
+    const { data: currentOrder, error: fetchError } = await supabase
+      .from("orders")
+      .select("order_status")
+      .eq("id", orderId)
+      .single();
+
+    if (fetchError || !currentOrder) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    // RESTRICTION: Cannot change status if already delivered
+    if (currentOrder.order_status === 'delivered') {
+      return res.status(403).json({
+        success: false,
+        error: "Cannot change status of delivered orders"
+      });
+    }
+
+    // Validate status transitions
+    const statusFlow = {
+      'pending': ['processing', 'cancelled'],
+      'processing': ['shipped', 'cancelled'],
+      'shipped': ['delivered'],
+      'delivered': [],
+      'cancelled': []
+    };
+
+    const allowedTransitions = statusFlow[currentOrder.order_status];
+    if (!allowedTransitions.includes(order_status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status transition from ${currentOrder.order_status} to ${order_status}`,
+        allowed_transitions: allowedTransitions
+      });
+    }
+
+    // Prepare update data
+    const updateData = {
+      order_status,
+      updated_at: new Date().toISOString()
+    };
+
+    if (order_status === 'shipped' && tracking_number) {
+      updateData.tracking_number = tracking_number;
+    }
+
     const { data, error } = await supabase
       .from("orders")
-      .update({
-        order_status,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq("id", orderId)
       .select()
       .single();
 
     if (error) throw error;
+
+    console.log(`✅ Order ${orderId} status updated to ${order_status}`);
 
     res.json({
       success: true,
@@ -469,6 +556,37 @@ router.patch("/:orderId/payment", async (req, res) => {
       });
     }
 
+    // Validate payment status
+    const validPaymentStatuses = ['pending', 'paid', 'failed'];
+    if (!validPaymentStatuses.includes(payment_status)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid payment status. Must be one of: " + validPaymentStatuses.join(', ')
+      });
+    }
+
+    // Check order details
+    const { data: currentOrder, error: fetchError } = await supabase
+      .from("orders")
+      .select("payment_method, payment_status, payment_intent_id")
+      .eq("id", orderId)
+      .single();
+
+    if (fetchError || !currentOrder) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    // RESTRICTION: Only COD orders can have payment status modified manually
+    if (currentOrder.payment_method !== 'cod' && currentOrder.payment_intent_id) {
+      return res.status(403).json({
+        success: false,
+        error: "Payment status for online payments is managed by PayMongo and cannot be modified manually"
+      });
+    }
+
     const { data, error } = await supabase
       .from("orders")
       .update({
@@ -480,6 +598,8 @@ router.patch("/:orderId/payment", async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    console.log(`✅ Order ${orderId} payment status updated to ${payment_status}`);
 
     res.json({
       success: true,
@@ -520,6 +640,8 @@ router.patch("/:orderId/tracking", async (req, res) => {
 
     if (error) throw error;
 
+    console.log(`✅ Order ${orderId} tracking number updated`);
+
     res.json({
       success: true,
       message: "Tracking number updated",
@@ -534,37 +656,75 @@ router.patch("/:orderId/tracking", async (req, res) => {
   }
 });
 
-// DELETE - Cancel order (only if pending)
+// DELETE - Cancel order (ENHANCED with stock restoration)
 router.delete("/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    // Check if order is pending
-    const { data: order } = await supabase
+    // Check if order exists and get full details
+    const { data: order, error: fetchError } = await supabase
       .from("orders")
-      .select("order_status")
+      .select(`
+        *,
+        order_items (
+          product_id,
+          quantity
+        )
+      `)
       .eq("id", orderId)
       .single();
 
-    if (!order) {
+    if (fetchError || !order) {
       return res.status(404).json({
         success: false,
         error: "Order not found"
       });
     }
 
-    if (order.order_status !== 'pending') {
+    // Only allow cancellation for pending and processing orders
+    const cancellableStatuses = ['pending', 'processing'];
+    if (!cancellableStatuses.includes(order.order_status)) {
       return res.status(400).json({
         success: false,
-        error: "Only pending orders can be cancelled"
+        error: `Cannot cancel order with status: ${order.order_status}`,
+        message: "Only orders with status 'pending' or 'processing' can be cancelled",
+        current_status: order.order_status
       });
     }
+
+    // Note: For online payments, you might want to initiate a refund with PayMongo here
+    if ((order.payment_method === 'gcash' || order.payment_method === 'card') && order.payment_status === 'paid') {
+      console.log('⚠️ Note: This order was paid online. Consider initiating a refund through PayMongo.');
+    }
+
+    // Restore product stock quantities
+    console.log('🔄 Restoring product stock...');
+    for (const item of order.order_items) {
+      const { data: product } = await supabase
+        .from("product")
+        .select("stock_quantity, sold_count")
+        .eq("id", item.product_id)
+        .single();
+
+      if (product) {
+        await supabase
+          .from("product")
+          .update({
+            stock_quantity: product.stock_quantity + item.quantity,
+            sold_count: Math.max(0, (product.sold_count || 0) - item.quantity),
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", item.product_id);
+      }
+    }
+    console.log('✅ Product stock restored');
 
     // Update status to cancelled instead of deleting
     const { data, error } = await supabase
       .from("orders")
       .update({
         order_status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
       .eq("id", orderId)
@@ -573,10 +733,13 @@ router.delete("/:orderId", async (req, res) => {
 
     if (error) throw error;
 
+    console.log(`✅ Order ${orderId} cancelled successfully`);
+
     res.json({
       success: true,
       message: "Order cancelled successfully",
-      order: data
+      order: data,
+      refund_status: order.payment_status === 'paid' ? 'Refund may be required' : 'No refund needed'
     });
   } catch (error) {
     console.error("❌ Cancel order error:", error);
