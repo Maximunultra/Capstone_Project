@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Hash, DollarSign, User, X, Send } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Hash, User, X, Send } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5000/api';
-// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const OrdersPage = ({ userId }) => {
   const navigate = useNavigate();
@@ -317,12 +317,15 @@ const OrdersPage = ({ userId }) => {
                       </div>
 
                       <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="w-4 h-4 text-gray-400" />
-                          <p className="text-sm text-gray-600">Total</p>
-                        </div>
-                        <p className="font-bold text-gray-900">₱{parseFloat(order.total_amount).toFixed(2)}</p>
-                      </div>
+  <div className="flex items-center gap-2">
+    <span className="text-gray-500 text-base font-medium leading-none">₱</span>
+    <p className="text-sm text-gray-600">Total</p>
+  </div>
+  <p className="font-bold text-gray-900">
+    ₱{parseFloat(order.total_amount).toFixed(2)}
+  </p>
+</div>
+
 
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.order_status)}`}>
                         {getStatusIcon(order.order_status)}
@@ -487,10 +490,10 @@ const OrdersPage = ({ userId }) => {
                                 </div>
                               </div>
 
-                              <div className="text-right">
+                              {/* <div className="text-right">
                                 <p className="text-sm text-gray-600 mb-1">Subtotal</p>
                                 <p className="text-xl font-bold text-gray-900">₱{parseFloat(item.subtotal).toFixed(2)}</p>
-                              </div>
+                              </div> */}
                             </div>
                           </div>
                         ))}
@@ -500,7 +503,7 @@ const OrdersPage = ({ userId }) => {
                     {/* Cost Summary */}
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <DollarSign className="w-5 h-5 text-blue-600" />
+                        <span className="text-blue-600 text-large">₱</span>
                         Order Summary
                       </h3>
                       <div className="bg-gray-50 rounded-xl p-6">

@@ -4,8 +4,8 @@ import { Package, CheckCircle, ShoppingBag, Mail } from 'lucide-react';
 import OrdersPage from './OrdersPage';
 import MessagesTab from './MessagesTab'; // IMPORT THE MESSAGES TAB HERE
 
-// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
 
 const CartPage = ({ userId }) => {
   const navigate = useNavigate();

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, Send, Search, ArrowLeft, MoreVertical, Package, X, User } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const MessagesPage = () => {
   const navigate = useNavigate();
