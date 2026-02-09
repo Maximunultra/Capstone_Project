@@ -71,7 +71,8 @@ router.get("/", async (req, res) => {
   try {
     const { 
       category, 
-      user_id, 
+      user_id,
+      seller_id, // Filter by seller ID
       is_active, 
       is_featured,
       min_price,
@@ -81,6 +82,15 @@ router.get("/", async (req, res) => {
       limit = 50,
       offset = 0
     } = req.query;
+
+    console.log('🔍 Product query filters:', { 
+      category, 
+      user_id, 
+      seller_id,
+      is_active, 
+      is_featured,
+      approval_status 
+    });
 
     let query = supabase
       .from("product")
@@ -101,6 +111,13 @@ router.get("/", async (req, res) => {
     // Apply filters
     if (category) query = query.eq('category', category);
     if (user_id) query = query.eq('user_id', user_id);
+    
+    // Filter products by seller
+    if (seller_id) {
+      console.log('🔒 Filtering products for seller:', seller_id);
+      query = query.eq('user_id', seller_id);
+    }
+    
     if (is_active !== undefined) query = query.eq('is_active', is_active === 'true');
     if (is_featured !== undefined) query = query.eq('is_featured', is_featured === 'true');
     if (min_price) query = query.gte('price', min_price);
@@ -119,6 +136,8 @@ router.get("/", async (req, res) => {
     
     if (error) throw error;
 
+    console.log(`✅ Fetched ${data.length} products (Total: ${count})`);
+    
     res.json({
       products: data,
       total: count,
@@ -179,6 +198,7 @@ router.post("/", async (req, res) => {
       is_active,
       is_featured,
       discount_percentage,
+      shipping_fee, // ✅ NEW: Accept shipping_fee
       tags
     } = req.body;
 
@@ -216,6 +236,11 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Stock quantity cannot be negative" });
     }
 
+    // ✅ NEW: Validate shipping_fee
+    if (shipping_fee !== undefined && shipping_fee < 0) {
+      return res.status(400).json({ error: "Shipping fee cannot be negative" });
+    }
+
     // Create product data object
     const productData = {
       user_id,
@@ -230,8 +255,9 @@ router.post("/", async (req, res) => {
       is_active: is_active !== undefined ? is_active : true,
       is_featured: is_featured || false,
       discount_percentage: discount_percentage || 0,
+      shipping_fee: parseFloat(shipping_fee) || 50.00, // ✅ NEW: Include shipping_fee (default 50.00)
       tags: tags || null,
-      approval_status: user.role === 'admin' ? 'approved' : 'pending', // Auto-approve for admin
+      approval_status: user.role === 'admin' ? 'approved' : 'pending',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -279,6 +305,7 @@ router.put("/:id", async (req, res) => {
       is_active,
       is_featured,
       discount_percentage,
+      shipping_fee, // ✅ NEW: Accept shipping_fee in updates
       tags,
       user_id // To verify ownership
     } = req.body;
@@ -294,17 +321,11 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Verify ownership (only product owner or admin can update)
-    if (user_id && existingProduct.user_id !== user_id) {
-      const { data: user } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user_id)
-        .single();
-
-      if (!user || user.role !== 'admin') {
+    // Verify ownership
+    if (user_id) {
+      if (existingProduct.user_id !== user_id) {
         return res.status(403).json({ 
-          error: "You don't have permission to update this product" 
+          error: "You don't have permission to update this product. Only the product owner can edit." 
         });
       }
     }
@@ -321,6 +342,15 @@ router.put("/:id", async (req, res) => {
     if (is_active !== undefined) updateFields.is_active = is_active;
     if (is_featured !== undefined) updateFields.is_featured = is_featured;
     if (discount_percentage !== undefined) updateFields.discount_percentage = discount_percentage;
+    
+    // ✅ NEW: Include shipping_fee in updates
+    if (shipping_fee !== undefined) {
+      if (parseFloat(shipping_fee) < 0) {
+        return res.status(400).json({ error: "Shipping fee cannot be negative" });
+      }
+      updateFields.shipping_fee = parseFloat(shipping_fee);
+    }
+    
     if (tags !== undefined) updateFields.tags = tags;
 
     updateFields.updated_at = new Date().toISOString();
@@ -353,7 +383,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { user_id } = req.body; // To verify ownership
+    const { user_id } = req.body;
 
     // Get product details
     const { data: product } = await supabase
@@ -366,17 +396,11 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Verify ownership (only product owner or admin can delete)
-    if (user_id && product.user_id !== user_id) {
-      const { data: user } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user_id)
-        .single();
-
-      if (!user || user.role !== 'admin') {
+    // Verify ownership
+    if (user_id) {
+      if (product.user_id !== user_id) {
         return res.status(403).json({ 
-          error: "You don't have permission to delete this product" 
+          error: "You don't have permission to delete this product. Only the product owner can delete." 
         });
       }
     }
@@ -412,7 +436,6 @@ router.delete("/:id", async (req, res) => {
       }
     } catch (storageError) {
       console.error('Error deleting product images:', storageError);
-      // Don't fail the entire operation if image deletion fails
     }
 
     console.log('✅ Product deleted successfully');
@@ -427,7 +450,7 @@ router.delete("/:id", async (req, res) => {
 router.patch("/:id/stock", async (req, res) => {
   try {
     const { id } = req.params;
-    const { quantity, operation } = req.body; // operation: 'add' or 'subtract'
+    const { quantity, operation } = req.body;
 
     if (!quantity || !operation) {
       return res.status(400).json({ 
