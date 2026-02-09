@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Truck, AlertCircle, Info } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 // const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const CheckoutPage = ({ userId }) => {
   const navigate = useNavigate();
@@ -10,6 +11,11 @@ const CheckoutPage = ({ userId }) => {
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  // ✅ PRICING CONSTANTS
+  const PLATFORM_FEE_PERCENTAGE = 0.03; // 3% platform commission (YOUR system's revenue)
+  const MINIMUM_SHIPPING_FEE = 100; // ₱100 minimum
+  const MINIMUM_PRODUCTS_FOR_DISCOUNT = 3; // Apply minimum fee when 3+ products
 
   // Form data
   const [shippingInfo, setShippingInfo] = useState({
@@ -56,6 +62,9 @@ const CheckoutPage = ({ userId }) => {
     }
   };
 
+  /**
+   * Calculate subtotal (sum of all product prices × quantities)
+   */
   const calculateSubtotal = () => {
     return cartItems.reduce((sum, item) => {
       const price = item.price || item.product?.price || 0;
@@ -63,15 +72,65 @@ const CheckoutPage = ({ userId }) => {
     }, 0).toFixed(2);
   };
 
-  const calculateTax = () => {
+  /**
+   * ✅ Calculate platform fee (3% commission for YOUR system)
+   * Formula: Subtotal × 3%
+   * Example: ₱1,000 × 0.03 = ₱30
+   */
+  const calculatePlatformFee = () => {
     const subtotal = parseFloat(calculateSubtotal());
-    return (subtotal * 0.12).toFixed(2);
+    return (subtotal * PLATFORM_FEE_PERCENTAGE).toFixed(2);
   };
 
+  /**
+   * Calculate shipping fee based on business rules:
+   * 1. Sum all product shipping fees × quantities
+   * 2. If 3+ products ordered, apply minimum shipping fee (₱100)
+   * 3. Use whichever is higher: calculated fee or minimum fee
+   */
+  const calculateShippingFee = () => {
+    const calculatedShipping = cartItems.reduce((sum, item) => {
+      const shippingFee = parseFloat(item.product?.shipping_fee || 50);
+      return sum + (shippingFee * item.quantity);
+    }, 0);
+
+    const totalProducts = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    if (totalProducts >= MINIMUM_PRODUCTS_FOR_DISCOUNT) {
+      return Math.max(calculatedShipping, MINIMUM_SHIPPING_FEE).toFixed(2);
+    }
+
+    return calculatedShipping.toFixed(2);
+  };
+
+  /**
+   * Check if minimum shipping fee rule was applied
+   */
+  const isMinimumShippingApplied = () => {
+    const totalProducts = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+    
+    if (totalProducts >= MINIMUM_PRODUCTS_FOR_DISCOUNT) {
+      const calculatedShipping = cartItems.reduce((sum, item) => {
+        const shippingFee = parseFloat(item.product?.shipping_fee || 50);
+        return sum + (shippingFee * item.quantity);
+      }, 0);
+      
+      return calculatedShipping < MINIMUM_SHIPPING_FEE;
+    }
+    
+    return false;
+  };
+
+  /**
+   * ✅ Calculate final total
+   * Formula: Subtotal + Platform Fee (3%) + Shipping Fee
+   */
   const calculateTotal = () => {
     const subtotal = parseFloat(calculateSubtotal());
-    const tax = parseFloat(calculateTax());
-    return (subtotal + tax).toFixed(2);
+    const platformFee = parseFloat(calculatePlatformFee());
+    const shipping = parseFloat(calculateShippingFee());
+    
+    return (subtotal + platformFee + shipping).toFixed(2);
   };
 
   const handleShippingSubmit = (e) => {
@@ -89,20 +148,17 @@ const CheckoutPage = ({ userId }) => {
       return;
     }
 
-    // Check minimum amount for online payments
     const total = parseFloat(calculateTotal());
-    if ((paymentMethod === 'gcash' || paymentMethod === 'card') && total < 100) {
-      alert('Minimum order amount for GCash and Card payment is ₱100.00. Please use Cash on Delivery or add more items to your cart.');
+    if ((paymentMethod === 'gcash' || paymentMethod === 'paypal') && total < 100) {
+      alert('Minimum order amount for GCash and PayPal payment is ₱100.00. Please use Cash on Delivery or add more items to your cart.');
       return;
     }
 
-    // If Cash on Delivery, process order directly
     if (paymentMethod === 'cod') {
       processOrder();
       return;
     }
 
-    // For GCash and Card payments, initiate PayMongo payment
     await initiatePayMongoPayment();
   };
 
@@ -110,16 +166,14 @@ const CheckoutPage = ({ userId }) => {
     try {
       setProcessingPayment(true);
       
-      const totalAmount = Math.round(parseFloat(calculateTotal()) * 100); // Convert to centavos
+      const totalAmount = Math.round(parseFloat(calculateTotal()) * 100);
 
-      // Validate minimum amount (10000 centavos = ₱100)
       if (totalAmount < 10000) {
         alert('Minimum order amount for online payment is ₱100.00');
         setProcessingPayment(false);
         return;
       }
 
-      // Create payment intent
       const paymentData = {
         amount: totalAmount,
         payment_method: paymentMethod,
@@ -139,8 +193,6 @@ const CheckoutPage = ({ userId }) => {
         }
       };
 
-      console.log('Creating payment with amount:', totalAmount, 'centavos (₱' + (totalAmount/100) + ')');
-
       const response = await fetch(`${API_BASE_URL}/payment/create-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,22 +206,19 @@ const CheckoutPage = ({ userId }) => {
 
       const data = await response.json();
 
-      // Redirect to PayMongo checkout page
       if (data.checkout_url) {
-        // Store order data temporarily (will be used after redirect)
         localStorage.setItem('pendingOrder', JSON.stringify({
           user_id: currentUserId,
           shipping_info: shippingInfo,
           payment_method: paymentMethod,
           cart_items: cartItems,
           subtotal: calculateSubtotal(),
-          tax: calculateTax(),
-          shipping_fee: 0,
+          tax: calculatePlatformFee(), // ✅ Store as "tax" for backend compatibility (will rename column later)
+          shipping_fee: calculateShippingFee(),
           total: calculateTotal(),
           payment_intent_id: data.payment_intent_id
         }));
 
-        // Redirect to PayMongo
         window.location.href = data.checkout_url;
       }
 
@@ -190,8 +239,8 @@ const CheckoutPage = ({ userId }) => {
         payment_method: paymentMethod,
         cart_items: cartItems,
         subtotal: calculateSubtotal(),
-        tax: calculateTax(),
-        shipping_fee: 0,
+        tax: calculatePlatformFee(), // ✅ Backend still uses "tax" field (represents platform fee)
+        shipping_fee: calculateShippingFee(),
         total: calculateTotal(),
         payment_intent_id: paymentIntentId,
         payment_status: paymentMethod === 'cod' ? 'pending' : 'paid'
@@ -232,96 +281,66 @@ const CheckoutPage = ({ userId }) => {
     setShippingInfo(prev => ({ ...prev, [name]: value }));
   };
 
-  // Check for payment success on component mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const paymentSuccess = urlParams.get('payment_success');
     const paymentIntentId = urlParams.get('payment_intent_id');
-    const sourceId = urlParams.get('source_id');
+    const paymentMethodParam = urlParams.get('payment_method');
+    const token = urlParams.get('token');
 
-    console.log('=== PAYMENT REDIRECT CHECK ===');
-    console.log('URL:', window.location.href);
-    console.log('payment_success:', paymentSuccess);
-    console.log('payment_intent_id:', paymentIntentId);
-    console.log('source_id:', sourceId);
-    console.log('=============================');
-
-    if (paymentSuccess === 'true' && (paymentIntentId || sourceId)) {
-      console.log('✅ Payment success detected!');
-      
+    if (paymentSuccess === 'true') {
       const pendingOrder = localStorage.getItem('pendingOrder');
-      console.log('📦 Pending order from localStorage:', pendingOrder ? 'Found' : 'Not found');
       
       if (pendingOrder) {
         const orderData = JSON.parse(pendingOrder);
         
-        console.log('📝 Order data:', orderData);
-        
-        // Set the state from stored data for UI display
         setShippingInfo(orderData.shipping_info);
         setPaymentMethod(orderData.payment_method);
         setCartItems(orderData.cart_items);
         
-        console.log('🚀 Processing order with payment ID:', paymentIntentId || sourceId);
+        if (paymentMethodParam === 'paypal' && token) {
+          processPayPalOrder(orderData, token);
+        } 
+        else if (paymentIntentId) {
+          processOrderWithData(orderData, paymentIntentId);
+        }
         
-        // Process the order using the data from localStorage directly
-        // Don't rely on state updates as they're async
-        processOrderWithData(orderData, paymentIntentId || sourceId);
-        
-        // Clear pending order
         localStorage.removeItem('pendingOrder');
-        console.log('🧹 Cleared pending order from localStorage');
-        
-        // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
       } else {
-        console.error('❌ No pending order found in localStorage!');
-        alert('Payment successful, but order data was lost. Please contact support with your payment confirmation.');
+        alert('Payment successful, but order data was lost. Please contact support.');
       }
     }
   }, []);
 
-  // New function to process order with data directly from localStorage
-  const processOrderWithData = async (orderData, paymentIntentId) => {
+  const processPayPalOrder = async (orderData, token) => {
     try {
       setLoading(true);
       
-      // If this is a GCash source, create the payment in PayMongo first
-      if (paymentIntentId && paymentIntentId.startsWith('src_')) {
-        console.log('💳 Creating PayMongo payment from GCash source:', paymentIntentId);
-        try {
-          const paymentResponse = await fetch(`${API_BASE_URL}/payment/create-payment-from-source`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source_id: paymentIntentId })
-          });
-          
-          if (paymentResponse.ok) {
-            const paymentData = await paymentResponse.json();
-            console.log('✅ PayMongo payment created:', paymentData.payment_id);
-          } else {
-            console.warn('⚠️ Could not create PayMongo payment, but order will still be created');
-          }
-        } catch (error) {
-          console.warn('⚠️ PayMongo payment creation failed:', error.message);
-          // Continue with order creation even if PayMongo payment fails
-        }
+      const captureResponse = await fetch(`${API_BASE_URL}/payment/capture-paypal/${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!captureResponse.ok) {
+        const errorData = await captureResponse.json();
+        throw new Error(errorData.error || 'Failed to capture PayPal payment');
       }
-      
+
+      const captureData = await captureResponse.json();
+
       const requestData = {
         user_id: orderData.user_id,
         shipping_info: orderData.shipping_info,
-        payment_method: orderData.payment_method,
+        payment_method: 'paypal',
         cart_items: orderData.cart_items,
         subtotal: orderData.subtotal,
-        tax: orderData.tax,
-        shipping_fee: orderData.shipping_fee || 0,
+        tax: orderData.tax, // Platform fee stored as "tax"
+        shipping_fee: orderData.shipping_fee,
         total: orderData.total,
-        payment_intent_id: paymentIntentId,
-        payment_status: orderData.payment_method === 'cod' ? 'pending' : 'paid'
+        payment_intent_id: token,
+        payment_status: 'paid'
       };
-
-      console.log('📤 Sending order request:', requestData);
 
       const response = await fetch(`${API_BASE_URL}/orders`, {
         method: 'POST',
@@ -331,13 +350,57 @@ const CheckoutPage = ({ userId }) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ Order creation failed:', errorData);
         throw new Error(errorData.error || 'Failed to process order');
       }
 
       const data = await response.json();
 
-      console.log('✅ Order created successfully:', data.order.order_number);
+      setOrderConfirmation({
+        orderNumber: data.order.order_number,
+        orderId: data.order.id,
+        date: new Date(data.order.order_date).toLocaleDateString(),
+        ...requestData
+      });
+
+      setCurrentStep(4);
+      setLoading(false);
+
+    } catch (error) {
+      console.error('❌ PayPal order processing failed:', error);
+      alert('Failed to process PayPal payment. Error: ' + error.message);
+      setLoading(false);
+    }
+  };
+
+  const processOrderWithData = async (orderData, paymentIntentId) => {
+    try {
+      setLoading(true);
+      
+      const requestData = {
+        user_id: orderData.user_id,
+        shipping_info: orderData.shipping_info,
+        payment_method: orderData.payment_method,
+        cart_items: orderData.cart_items,
+        subtotal: orderData.subtotal,
+        tax: orderData.tax, // Platform fee stored as "tax"
+        shipping_fee: orderData.shipping_fee,
+        total: orderData.total,
+        payment_intent_id: paymentIntentId,
+        payment_status: orderData.payment_method === 'cod' ? 'pending' : 'paid'
+      };
+
+      const response = await fetch(`${API_BASE_URL}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process order');
+      }
+
+      const data = await response.json();
 
       setOrderConfirmation({
         orderNumber: data.order.order_number,
@@ -351,7 +414,7 @@ const CheckoutPage = ({ userId }) => {
 
     } catch (error) {
       console.error('❌ Error processing order:', error);
-      alert('Failed to create order. Please contact support. Error: ' + error.message);
+      alert('Failed to create order. Error: ' + error.message);
       setLoading(false);
     }
   };
@@ -369,13 +432,13 @@ const CheckoutPage = ({ userId }) => {
     );
   }
 
-  // Check if cart total meets minimum for online payment
   const total = parseFloat(calculateTotal());
   const meetsMinimum = total >= 100;
+  const totalProducts = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Progress Bar */}
+      {/* Progress Bar - Same as before */}
       <div className="bg-gray-50 border-b border-gray-200 py-8">
         <div className="max-w-4xl mx-auto px-6">
           <div className="flex items-center justify-between">
@@ -420,156 +483,67 @@ const CheckoutPage = ({ userId }) => {
 
       {/* Step Content */}
       <div className="max-w-6xl mx-auto px-6 py-12">
-        {/* Step 1: Shipping Information */}
+        {/* Step 1: Shipping Information - Same as before, skipping for brevity */}
         {currentStep === 1 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
               <h2 className="text-3xl font-bold text-gray-900 mb-8">Shipping Information</h2>
               <form onSubmit={handleShippingSubmit} className="space-y-6">
+                {/* Full form fields same as original - skipping for brevity */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="fullName"
-                    value={shippingInfo.fullName}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="Juan Dela Cruz"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                  <input type="text" name="fullName" value={shippingInfo.fullName} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Juan Dela Cruz" />
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Email Address *
-                    </label>
-                    <input
-                      type="email"
-                      name="email"
-                      value={shippingInfo.email}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="juan@example.com"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                    <input type="email" name="email" value={shippingInfo.email} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Phone Number *
-                    </label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      value={shippingInfo.phone}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="+63 912 345 6789"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                    <input type="tel" name="phone" value={shippingInfo.phone} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                   </div>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Street Address *
-                  </label>
-                  <input
-                    type="text"
-                    name="address"
-                    value={shippingInfo.address}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="123 Main Street, Barangay Sample"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                  <input type="text" name="address" value={shippingInfo.address} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      City *
-                    </label>
-                    <input
-                      type="text"
-                      name="city"
-                      value={shippingInfo.city}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="Manila"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">City *</label>
+                    <input type="text" name="city" value={shippingInfo.city} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Province *
-                    </label>
-                    <input
-                      type="text"
-                      name="province"
-                      value={shippingInfo.province}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="Metro Manila"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Province *</label>
+                    <input type="text" name="province" value={shippingInfo.province} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Postal Code
-                    </label>
-                    <input
-                      type="text"
-                      name="postalCode"
-                      value={shippingInfo.postalCode}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="1000"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Postal Code</label>
+                    <input type="text" name="postalCode" value={shippingInfo.postalCode} onChange={handleInputChange} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                   </div>
                 </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold text-lg shadow-lg"
-                >
+                <button type="submit" className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold text-lg shadow-lg">
                   Continue to Review
                 </button>
               </form>
             </div>
-
             <div>
               <div className="bg-gray-50 rounded-lg p-6 sticky top-6">
-                <h3 className="font-bold text-gray-900 mb-4">Shipping & Privacy</h3>
+                <h3 className="font-bold text-gray-900 mb-4">💰 Fee Information</h3>
                 <div className="space-y-4 text-sm text-gray-600">
                   <div className="flex gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <p>Free shipping on orders over ₱1,000</p>
+                    <Info className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-gray-900">Platform Fee (3%)</p>
+                      <p className="text-xs">Service charge for using our marketplace</p>
+                    </div>
                   </div>
                   <div className="flex gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    <p>Your information is secure and encrypted</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    <p>Order confirmation will be sent to your email</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                    <p>We never share your personal information</p>
+                    <Info className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-gray-900">Shipping Fee</p>
+                      <p className="text-xs">Calculated based on products ordered</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -582,18 +556,12 @@ const CheckoutPage = ({ userId }) => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
               <h2 className="text-3xl font-bold text-gray-900 mb-8">Order Review</h2>
-
-              {/* Products */}
               <div className="space-y-4 mb-8">
                 {cartItems.map((item) => (
                   <div key={item.id} className="bg-gray-50 rounded-lg p-6 flex gap-4">
                     <div className="w-24 h-24 bg-white rounded-lg overflow-hidden flex-shrink-0">
                       {item.product?.product_image ? (
-                        <img
-                          src={item.product.product_image}
-                          alt={item.product.product_name}
-                          className="w-full h-full object-cover"
-                        />
+                        <img src={item.product.product_image} alt={item.product.product_name} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -603,29 +571,26 @@ const CheckoutPage = ({ userId }) => {
                       )}
                     </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 mb-1">
-                        {item.product?.product_name}
-                      </h3>
+                      <h3 className="font-semibold text-gray-900 mb-1">{item.product?.product_name}</h3>
                       <p className="text-sm text-gray-600 mb-2">Quantity: {item.quantity}</p>
-                      <p className="text-lg font-bold text-gray-900">
-                        ₱{((item.price || item.product?.price || 0) * item.quantity).toFixed(2)}
-                      </p>
+                      <div className="flex items-center gap-4">
+                        <p className="text-lg font-bold text-gray-900">
+                          ₱{((item.price || item.product?.price || 0) * item.quantity).toFixed(2)}
+                        </p>
+                        <div className="flex items-center text-sm text-gray-500">
+                          <Truck className="w-4 h-4 mr-1" />
+                          ₱{((item.product?.shipping_fee || 50) * item.quantity).toFixed(2)} shipping
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-
               <div className="flex gap-4">
-                <button
-                  onClick={() => setCurrentStep(1)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold"
-                >
+                <button onClick={() => setCurrentStep(1)} className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">
                   Back to Shipping
                 </button>
-                <button
-                  onClick={() => setCurrentStep(3)}
-                  className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg"
-                >
+                <button onClick={() => setCurrentStep(3)} className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg">
                   Continue to Payment
                 </button>
               </div>
@@ -644,18 +609,55 @@ const CheckoutPage = ({ userId }) => {
 
                 <h3 className="font-bold text-gray-900 mb-4">Order Summary</h3>
                 <div className="space-y-3">
+                  {/* Subtotal */}
                   <div className="flex justify-between text-gray-600">
                     <span>Subtotal</span>
                     <span className="font-medium">₱{calculateSubtotal()}</span>
                   </div>
+                  
+                  {/* ✅ Platform Fee (3%) - NEW LABEL */}
                   <div className="flex justify-between text-gray-600">
-                    <span>Tax (12%)</span>
-                    <span className="font-medium">₱{calculateTax()}</span>
+                    <div className="flex items-center gap-1">
+                      <span>Platform Fee</span>
+                      <div className="group relative">
+                        <Info className="w-3 h-3 text-gray-400 cursor-help" />
+                        <div className="hidden group-hover:block absolute left-0 top-5 bg-gray-800 text-white text-xs p-2 rounded w-48 z-10">
+                          3% service charge for using our marketplace
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-medium">₱{calculatePlatformFee()}</span>
                   </div>
+                  
+                  {/* Shipping Fee */}
                   <div className="flex justify-between text-gray-600">
-                    <span>Shipping</span>
-                    <span className="font-medium text-green-600">FREE</span>
+                    <div className="flex flex-col">
+                      <span>Shipping Fee</span>
+                      {isMinimumShippingApplied() && (
+                        <span className="text-xs text-blue-600">
+                          Minimum fee applied ({totalProducts} products)
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-medium">₱{calculateShippingFee()}</span>
                   </div>
+                  
+                  {/* Shipping Fee Explanation */}
+                  {totalProducts >= MINIMUM_PRODUCTS_FOR_DISCOUNT && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium">Shipping Fee Policy</p>
+                          <p className="mt-1">
+                            Orders with 3+ products: Minimum ₱{MINIMUM_SHIPPING_FEE} shipping fee applies.
+                            {isMinimumShippingApplied() && ' (Applied to your order)'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className="border-t border-gray-200 pt-3">
                     <div className="flex justify-between items-center">
                       <span className="text-lg font-bold text-gray-900">Total</span>
@@ -668,12 +670,11 @@ const CheckoutPage = ({ userId }) => {
           </div>
         )}
 
-        {/* Step 3: Payment */}
+        {/* Step 3: Payment - Same as before, skipping details for brevity */}
         {currentStep === 3 && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Select Payment Method</h2>
 
-            {/* Minimum Amount Warning */}
             {!meetsMinimum && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
                 <div className="flex gap-3">
@@ -683,37 +684,23 @@ const CheckoutPage = ({ userId }) => {
                   <div>
                     <p className="text-sm font-semibold text-yellow-800">Minimum Amount Required</p>
                     <p className="text-sm text-yellow-700 mt-1">
-                      Your cart total (₱{calculateTotal()}) is below the ₱100.00 minimum for GCash and Card payments. 
-                      Please use Cash on Delivery or add more items to your cart.
+                      Your cart total (₱{calculateTotal()}) is below the ₱100.00 minimum for GCash and PayPal payments.
                     </p>
                   </div>
                 </div>
               </div>
             )}
 
+            {/* Payment buttons - same as before */}
             <div className="space-y-4 mb-8">
-              {/* GCash */}
-              <button
-                onClick={() => setPaymentMethod('gcash')}
-                disabled={!meetsMinimum}
-                className={`w-full p-6 rounded-lg border-2 transition-all ${
-                  !meetsMinimum 
-                    ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
-                    : paymentMethod === 'gcash'
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 hover:border-green-300'
-                }`}
-              >
+              <button onClick={() => setPaymentMethod('gcash')} disabled={!meetsMinimum} className={`w-full p-6 rounded-lg border-2 transition-all ${!meetsMinimum ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed' : paymentMethod === 'gcash' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
                     <span className="text-white font-bold text-xl">G</span>
                   </div>
                   <div className="text-left flex-1">
                     <h3 className="font-bold text-gray-900 text-lg">GCash</h3>
-                    <p className="text-sm text-gray-600">
-                      Pay securely with your GCash account
-                      {!meetsMinimum && <span className="block text-red-600 font-medium mt-1">Minimum ₱100.00 required</span>}
-                    </p>
+                    <p className="text-sm text-gray-600">Pay securely with your GCash account</p>
                   </div>
                   {paymentMethod === 'gcash' && meetsMinimum && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -723,48 +710,26 @@ const CheckoutPage = ({ userId }) => {
                 </div>
               </button>
 
-              {/* Card Payment */}
-              {/* <button
-                onClick={() => setPaymentMethod('card')}
-                disabled={!meetsMinimum}
-                className={`w-full p-6 rounded-lg border-2 transition-all ${
-                  !meetsMinimum
-                    ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
-                    : paymentMethod === 'card'
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 hover:border-green-300'
-                }`}
-              >
+              <button onClick={() => setPaymentMethod('paypal')} disabled={!meetsMinimum} className={`w-full p-6 rounded-lg border-2 transition-all ${!meetsMinimum ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed' : paymentMethod === 'paypal' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  <div className="w-16 h-16 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944 3.72a.936.936 0 0 1 .92-.768h6.811c1.863 0 3.339.394 4.428 1.182 1.089.788 1.634 1.954 1.634 3.498 0 .844-.172 1.616-.516 2.316-.344.7-.838 1.298-1.482 1.794a6.418 6.418 0 0 1-2.271 1.078c-.885.22-1.847.33-2.886.33h-1.447l-.994 6.187a.643.643 0 0 1-.633.533zm15.81-12.165c0 1.453-.394 2.732-1.182 3.838-.788 1.106-1.892 1.947-3.312 2.523-1.42.576-3.062.864-4.926.864h-2.07l-1.194 7.434a.641.641 0 0 1-.633.533h-4.35a.642.642 0 0 1-.633-.74l3.106-16.857a.936.936 0 0 1 .92-.768h7.094c1.863 0 3.339.394 4.428 1.182 1.089.788 1.752 1.954 1.752 3.498z"/>
                     </svg>
                   </div>
                   <div className="text-left flex-1">
-                    <h3 className="font-bold text-gray-900 text-lg">Credit/Debit Card</h3>
-                    <p className="text-sm text-gray-600">
-                      Pay with Visa, Mastercard, or other cards
-                      {!meetsMinimum && <span className="block text-red-600 font-medium mt-1">Minimum ₱100.00 required</span>}
-                    </p>
+                    <h3 className="font-bold text-gray-900 text-lg">PayPal</h3>
+                    <p className="text-sm text-gray-600">Pay securely with your PayPal account</p>
                   </div>
-                  {paymentMethod === 'card' && meetsMinimum && (
+                  {paymentMethod === 'paypal' && meetsMinimum && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
                 </div>
-              </button> */}
+              </button>
 
-              {/* Cash on Delivery */}
-              <button
-                onClick={() => setPaymentMethod('cod')}
-                className={`w-full p-6 rounded-lg border-2 transition-all ${
-                  paymentMethod === 'cod'
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 hover:border-green-300'
-                }`}
-              >
+              <button onClick={() => setPaymentMethod('cod')} className={`w-full p-6 rounded-lg border-2 transition-all ${paymentMethod === 'cod' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-gray-700 rounded-lg flex items-center justify-center flex-shrink-0">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -784,40 +749,34 @@ const CheckoutPage = ({ userId }) => {
               </button>
             </div>
 
-            {/* Security Notice */}
-            {(paymentMethod === 'gcash' || paymentMethod === 'card') && meetsMinimum && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <div className="flex gap-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm text-blue-800">
-                    You will be redirected to a secure payment page to complete your transaction.
-                  </p>
+            <div className="bg-gray-50 rounded-lg p-6 mb-6">
+              <div className="space-y-2 mb-4">
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Subtotal</span>
+                  <span>₱{calculateSubtotal()}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Platform Fee (3%)</span>
+                  <span>₱{calculatePlatformFee()}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Shipping Fee</span>
+                  <span>₱{calculateShippingFee()}</span>
                 </div>
               </div>
-            )}
-
-            {/* Order Summary */}
-            <div className="bg-gray-50 rounded-lg p-6 mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-600">Total Amount</span>
-                <span className="text-3xl font-bold text-green-600">₱{calculateTotal()}</span>
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Total Amount</span>
+                  <span className="text-3xl font-bold text-green-600">₱{calculateTotal()}</span>
+                </div>
               </div>
             </div>
 
             <div className="flex gap-4">
-              <button
-                onClick={() => setCurrentStep(2)}
-                className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold"
-              >
+              <button onClick={() => setCurrentStep(2)} className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">
                 Back to Review
               </button>
-              <button
-                onClick={handlePaymentSubmit}
-                disabled={!paymentMethod || processingPayment}
-                className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed"
-              >
+              <button onClick={handlePaymentSubmit} disabled={!paymentMethod || processingPayment} className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed">
                 {processingPayment ? 'Processing...' : 'Complete Order'}
               </button>
             </div>
@@ -857,28 +816,35 @@ const CheckoutPage = ({ userId }) => {
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 pt-4">
+              <div className="border-t border-gray-200 pt-4 mb-4">
                 <p className="text-sm text-gray-600 mb-2">Shipping To:</p>
                 <p className="font-medium text-gray-900">{shippingInfo.fullName}</p>
                 <p className="text-sm text-gray-600">{shippingInfo.address}</p>
                 <p className="text-sm text-gray-600">{shippingInfo.city}, {shippingInfo.province}</p>
               </div>
+
+              <div className="border-t border-gray-200 pt-4">
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">Platform Fee</span>
+                  <span className="font-medium">₱{orderConfirmation.tax}</span>
+                </div>
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-gray-600">Shipping Fee</span>
+                  <span className="font-medium">₱{orderConfirmation.shipping_fee}</span>
+                </div>
+                {isMinimumShippingApplied() && (
+                  <p className="text-xs text-blue-600">
+                    Minimum shipping fee applied ({totalProducts} products ordered)
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-3">
-              {/* <p className="text-gray-600">
-                A confirmation email has been sent to <span className="font-medium">{shippingInfo.email}</span>
-              </p> */}
-              <button
-                onClick={() => navigate('/buyer/products')}
-                className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg"
-              >
+              <button onClick={() => navigate('/buyer/products')} className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg">
                 Continue Shopping
               </button>
-              <button
-                onClick={() => navigate('/buyer/orders')}
-                className="w-full bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold"
-              >
+              <button onClick={() => navigate('/buyer/orders')} className="w-full bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">
                 View My Orders
               </button>
             </div>
