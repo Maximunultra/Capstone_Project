@@ -78,7 +78,8 @@ router.get("/", async (req, res) => {
       min_price,
       max_price,
       search,
-      approval_status,
+      approval_status, // ✅ This is now important
+      buyer_view, // ✅ NEW: Flag to indicate buyer is viewing
       limit = 50,
       offset = 0
     } = req.query;
@@ -89,7 +90,8 @@ router.get("/", async (req, res) => {
       seller_id,
       is_active, 
       is_featured,
-      approval_status 
+      approval_status,
+      buyer_view
     });
 
     let query = supabase
@@ -108,7 +110,14 @@ router.get("/", async (req, res) => {
         )
       `, { count: 'exact' });
 
-    // Apply filters
+    // ✅ IMPORTANT: If this is buyer view, only show approved and active products
+    if (buyer_view === 'true') {
+      console.log('🛍️ Buyer view: Filtering for approved products only');
+      query = query.eq('approval_status', 'approved');
+      query = query.eq('is_active', true);
+    }
+
+    // Apply other filters
     if (category) query = query.eq('category', category);
     if (user_id) query = query.eq('user_id', user_id);
     
@@ -118,11 +127,20 @@ router.get("/", async (req, res) => {
       query = query.eq('user_id', seller_id);
     }
     
-    if (is_active !== undefined) query = query.eq('is_active', is_active === 'true');
+    if (is_active !== undefined && buyer_view !== 'true') {
+      // Only apply is_active filter if not in buyer view (buyer view already filters this)
+      query = query.eq('is_active', is_active === 'true');
+    }
+    
     if (is_featured !== undefined) query = query.eq('is_featured', is_featured === 'true');
     if (min_price) query = query.gte('price', min_price);
     if (max_price) query = query.lte('price', max_price);
-    if (approval_status) query = query.eq('approval_status', approval_status);
+    
+    if (approval_status && buyer_view !== 'true') {
+      // Only apply approval_status filter if not in buyer view (buyer view already filters this)
+      query = query.eq('approval_status', approval_status);
+    }
+    
     if (search) {
       query = query.or(`product_name.ilike.%${search}%,description.ilike.%${search}%`);
     }

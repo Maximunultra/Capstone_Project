@@ -251,7 +251,7 @@ router.patch('/:id/approve', async (req, res) => {
     // Check if promotion exists
     const { data: promotion } = await supabase
       .from('promotions')
-      .select('start_date, end_date')
+      .select('*')
       .eq('id', id)
       .single();
 
@@ -262,18 +262,11 @@ router.patch('/:id/approve', async (req, res) => {
       });
     }
 
-    // Determine if promotion should be active or just approved
-    const now = new Date();
-    const startDate = new Date(promotion.start_date);
-    const endDate = new Date(promotion.end_date);
-    
-    const newStatus = (now >= startDate && now <= endDate) ? 'active' : 'approved';
-
-    // Update promotion
+    // Update promotion - status will always be 'approved'
     const { data, error } = await supabase
       .from('promotions')
       .update({ 
-        status: newStatus,
+        status: 'approved',
         approved_by: admin_id,
         approved_at: new Date().toISOString()
       })
@@ -283,11 +276,11 @@ router.patch('/:id/approve', async (req, res) => {
 
     if (error) throw error;
 
-    console.log(`✅ Promotion ${id} approved with status: ${newStatus}`);
+    console.log(`✅ Promotion ${id} approved successfully`);
 
     res.json({
       success: true,
-      message: `Promotion ${newStatus === 'active' ? 'approved and activated' : 'approved'} successfully`,
+      message: 'Promotion approved successfully',
       promotion: data
     });
 

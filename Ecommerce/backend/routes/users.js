@@ -102,7 +102,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     console.log('📝 User registration request received');
-    const { full_name, email, password, role, phone, address, profile_image, proof_document } = req.body;
+    const { full_name, email, password, role, phone, address, profile_image, proof_document, valid_id_front, valid_id_back } = req.body;
     
     if (!full_name || !email || !password || !role) {
       return res.status(400).json({ 
@@ -117,11 +117,23 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Require proof document for sellers
-    if (role === 'seller' && !proof_document) {
-      return res.status(400).json({ 
-        error: "Barangay certificate or proof of residence is required for sellers" 
-      });
+    // Require documents for sellers
+    if (role === 'seller') {
+      if (!proof_document) {
+        return res.status(400).json({ 
+          error: "Barangay certificate or proof of residence is required for sellers" 
+        });
+      }
+      if (!valid_id_front) {
+        return res.status(400).json({ 
+          error: "Valid ID front photo is required for sellers" 
+        });
+      }
+      if (!valid_id_back) {
+        return res.status(400).json({ 
+          error: "Valid ID back photo is required for sellers" 
+        });
+      }
     }
 
     // Validate email format
@@ -163,6 +175,8 @@ router.post("/", async (req, res) => {
       address: address || null,
       profile_image: profile_image || null,
       proof_document: proof_document || null, // Add proof document field
+      valid_id_front: valid_id_front || null, // Add valid ID front
+      valid_id_back: valid_id_back || null, // Add valid ID back
       approval_status: role === 'seller' ? 'pending' : 'approved', // Sellers need approval, buyers auto-approved
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -218,7 +232,7 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, email, password, role, phone, address, profile_image, proof_document } = req.body;
+    const { full_name, email, password, role, phone, address, profile_image, proof_document, valid_id_front, valid_id_back } = req.body;
     
     const updateFields = {};
     if (full_name) updateFields.full_name = full_name;
@@ -245,6 +259,8 @@ router.put("/:id", async (req, res) => {
     if (address !== undefined) updateFields.address = address;
     if (profile_image !== undefined) updateFields.profile_image = profile_image;
     if (proof_document !== undefined) updateFields.proof_document = proof_document;
+    if (valid_id_front !== undefined) updateFields.valid_id_front = valid_id_front;
+    if (valid_id_back !== undefined) updateFields.valid_id_back = valid_id_back;
 
     // Add updated timestamp
     updateFields.updated_at = new Date().toISOString();
@@ -274,10 +290,10 @@ router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     
-    // First, get the user to check if they have a profile image or proof document
+    // First, get the user to check if they have images to delete
     const { data: user } = await supabase
       .from("users")
-      .select("profile_image, proof_document")
+      .select("profile_image, proof_document, valid_id_front, valid_id_back")
       .eq("id", id)
       .single();
 
@@ -289,29 +305,40 @@ router.delete("/:id", async (req, res) => {
 
     if (error) throw error;
 
-    // If user had a profile image, delete it from storage
-    if (user && user.profile_image) {
-      try {
+    // Delete all user images from storage
+    if (user) {
+      const imagesToDelete = [];
+      
+      if (user.profile_image) {
         const imagePath = user.profile_image.split('/').pop();
-        await supabase.storage
-          .from('user-profile-images')
-          .remove([`profiles/${imagePath}`]);
-      } catch (storageError) {
-        console.error('Error deleting profile image:', storageError);
-        // Don't fail the entire operation if image deletion fails
+        imagesToDelete.push(`profiles/${imagePath}`);
       }
-    }
-
-    // If user had a proof document, delete it from storage
-    if (user && user.proof_document) {
-      try {
+      
+      if (user.proof_document) {
         const documentPath = user.proof_document.split('/').pop();
-        await supabase.storage
-          .from('user-profile-images')
-          .remove([`profiles/${documentPath}`]);
-      } catch (storageError) {
-        console.error('Error deleting proof document:', storageError);
-        // Don't fail the entire operation if document deletion fails
+        imagesToDelete.push(`profiles/${documentPath}`);
+      }
+      
+      if (user.valid_id_front) {
+        const idFrontPath = user.valid_id_front.split('/').pop();
+        imagesToDelete.push(`profiles/${idFrontPath}`);
+      }
+      
+      if (user.valid_id_back) {
+        const idBackPath = user.valid_id_back.split('/').pop();
+        imagesToDelete.push(`profiles/${idBackPath}`);
+      }
+      
+      // Delete all images in one call
+      if (imagesToDelete.length > 0) {
+        try {
+          await supabase.storage
+            .from('user-profile-images')
+            .remove(imagesToDelete);
+        } catch (storageError) {
+          console.error('Error deleting user images:', storageError);
+          // Don't fail the entire operation if image deletion fails
+        }
       }
     }
 
