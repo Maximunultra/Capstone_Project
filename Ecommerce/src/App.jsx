@@ -7,6 +7,7 @@ import AdminDashboard from "./admin/Pages/Dashboard";
 import AdminLayout from "./admin/Components/Layout";
 import UsersManager from "./admin/Pages/Seller";
 import AdminAnalytics from "./admin/Pages/AdminAnalytics";  
+import AdminProductPage from "./admin/Pages/AdminProductPage";
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
 import LandingLayout from "./user_buyer/Components/LandingLayout";
@@ -16,12 +17,14 @@ import CheckoutPage from "./user_buyer/Pages/CheckoutPage";
 import OrdersPage from "./user_buyer/Pages/OrdersPage";
 import OrderDetailsPage from "./user_buyer/Pages/OrderDetailsPage";
 import MessagesPage from './user_buyer/Pages/MessagesPage';
+import Profile from './user_buyer/Pages/Profile';
 // Seller Components
 import SellerDashboard from "./user_seller/Pages/Dashboard";
 import SellerLayout from "./user_seller/Components/Layout";
 import SellerOrderManagement from "./user_seller/Pages/Sellerordermanagement";
 import SellerAnalytics from "./user_seller/Pages/Selleranalytics";
 import SellerMessagesPage from "./user_seller/Pages/SellerMessagesPage";
+import ProfileSeller from "./user_seller/Pages/ProfileSeller";
 // Shared Components
 import Login from "./Login";
 import ForgotPassword from "./Components/ForgotPassword";
@@ -91,12 +94,12 @@ const App = () => {
                 />
                 <Route 
                   path="/products/:id" 
-                  element={<ProductDetailPage />} 
+                  element={<AdminProductPage userId={userId} userRole={userRole} />} 
                 />
-                <Route 
+                {/* <Route 
                   path="/products/:id/edit" 
                   element={<ProductEditPage />} 
-                />
+                /> */}
                 
                 {/* Admin Promotion Routes */}
                 <Route 
@@ -135,7 +138,8 @@ const App = () => {
           <PrivateRoute isAuthenticated={isAuthenticated} allowedRole="seller" userRole={userRole}>
             <SellerLayout>
               <Routes>
-                <Route path="/" element={<SellerDashboard />} />
+                {/* Redirect root to analytics instead of dashboard */}
+                <Route path="/" element={<Navigate to="/seller/analytics" replace />} />
                 <Route path="/dashboard" element={<SellerDashboard />} />
                 
                 {/* Seller Product Routes */}
@@ -168,7 +172,7 @@ const App = () => {
                   element={<SellerOrderManagement />} 
                 />
 
-                {/* Seller Analytics */}
+                {/* Seller Analytics - Now the default landing page */}
                 <Route 
                   path="/analytics" 
                   element={<SellerAnalytics />} 
@@ -176,6 +180,10 @@ const App = () => {
                 <Route 
                   path="/messages" 
                   element={<SellerMessagesPage />} 
+                />
+                <Route 
+                  path="/profile" 
+                  element={<ProfileSeller />} 
                 />
               </Routes>
             </SellerLayout>
@@ -219,6 +227,13 @@ const App = () => {
                 path="/order/:orderId" 
                 element={<OrderDetailsPage />} 
               />
+              
+              {/* Profile Route */}
+              <Route 
+                path="/profile" 
+                element={<Profile userId={userId} />} 
+              />
+              
               <Route path="/messages" element={<MessagesPage />} />
             </Routes>
           </LandingLayout>

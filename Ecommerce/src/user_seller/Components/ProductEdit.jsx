@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Truck } from 'lucide-react';
+import { Truck, Upload, X, Image as ImageIcon } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
@@ -9,6 +9,7 @@ const ProductEditPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   
   // Get user info from localStorage
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -24,12 +25,16 @@ const ProductEditPage = () => {
     brand: '',
     stock_quantity: '',
     discount_percentage: '',
-    shipping_fee: '', // ✅ NEW: Add shipping_fee to form state
+    shipping_fee: '',
     product_image: '',
     is_active: true,
     is_featured: false,
     tags: ''
   });
+
+  // Image upload state
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   const [errors, setErrors] = useState({});
 
@@ -53,12 +58,17 @@ const ProductEditPage = () => {
         brand: data.brand || '',
         stock_quantity: data.stock_quantity || '',
         discount_percentage: data.discount_percentage || '',
-        shipping_fee: data.shipping_fee || '50.00', // ✅ NEW: Include shipping_fee
+        shipping_fee: data.shipping_fee || '50.00',
         product_image: data.product_image || '',
         is_active: data.is_active ?? true,
         is_featured: data.is_featured || false,
         tags: Array.isArray(data.tags) ? data.tags.join(', ') : ''
       });
+
+      // Set existing image as preview
+      if (data.product_image) {
+        setImagePreview(data.product_image);
+      }
 
       // Check if user has permission to edit
       if (userRole !== 'admin' && data.users && data.users.id !== userId) {
@@ -87,6 +97,78 @@ const ProductEditPage = () => {
     }
   };
 
+  // Handle image file selection
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file');
+        return;
+      }
+
+      // Validate file size (5MB limit)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Image size must be less than 5MB');
+        return;
+      }
+
+      setImageFile(file);
+      
+      // Create preview URL
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+
+      // Clear any previous image errors
+      if (errors.product_image) {
+        setErrors(prev => ({ ...prev, product_image: '' }));
+      }
+    }
+  };
+
+  // Remove selected image
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setFormData(prev => ({ ...prev, product_image: '' }));
+    
+    // Clear the file input
+    const fileInput = document.getElementById('image-upload');
+    if (fileInput) fileInput.value = '';
+  };
+
+  // Upload image to server
+  const uploadImage = async () => {
+    if (!imageFile) return formData.product_image; // Return existing URL if no new file
+
+    setUploadingImage(true);
+    try {
+      const formDataToUpload = new FormData();
+      formDataToUpload.append('images', imageFile);
+
+      const response = await fetch(`${API_BASE_URL}/products/upload`, {
+        method: 'POST',
+        body: formDataToUpload
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to upload image');
+      }
+
+      const data = await response.json();
+      return data.imageUrls[0]; // Return the first uploaded image URL
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      throw new Error('Failed to upload image: ' + error.message);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
 
@@ -110,7 +192,6 @@ const ProductEditPage = () => {
       newErrors.discount_percentage = 'Discount must be between 0 and 100';
     }
 
-    // ✅ NEW: Validate shipping_fee
     if (!formData.shipping_fee || parseFloat(formData.shipping_fee) < 0) {
       newErrors.shipping_fee = 'Valid shipping fee is required (minimum ₱0)';
     }
@@ -130,6 +211,12 @@ const ProductEditPage = () => {
     setSubmitting(true);
 
     try {
+      // Upload image if a new one is selected
+      let imageUrl = formData.product_image;
+      if (imageFile) {
+        imageUrl = await uploadImage();
+      }
+
       // Prepare data for API
       const updateData = {
         user_id: userId,
@@ -140,8 +227,8 @@ const ProductEditPage = () => {
         brand: formData.brand.trim(),
         stock_quantity: parseInt(formData.stock_quantity),
         discount_percentage: formData.discount_percentage ? parseFloat(formData.discount_percentage) : 0,
-        shipping_fee: parseFloat(formData.shipping_fee) || 50.00, // ✅ NEW: Include shipping_fee
-        product_image: formData.product_image.trim(),
+        shipping_fee: parseFloat(formData.shipping_fee) || 50.00,
+        product_image: imageUrl,
         is_active: formData.is_active,
         is_featured: formData.is_featured,
         tags: formData.tags ? formData.tags.split(',').map(tag => tag.trim()).filter(Boolean) : []
@@ -365,7 +452,7 @@ const ProductEditPage = () => {
                 )}
               </div>
 
-              {/* ✅ NEW: Shipping Fee */}
+              {/* Shipping Fee */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Shipping Fee (₱) <span className="text-red-500">*</span>
@@ -394,32 +481,62 @@ const ProductEditPage = () => {
               </div>
             </div>
 
-            {/* Product Image URL */}
+            {/* Product Image Upload */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Product Image URL
+                Product Image
               </label>
-              <input
-                type="url"
-                name="product_image"
-                value={formData.product_image}
-                onChange={handleChange}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="https://example.com/image.jpg"
-              />
-              {formData.product_image && (
-                <div className="mt-3">
-                  <p className="text-sm text-gray-600 mb-2">Preview:</p>
-                  <img
-                    src={formData.product_image}
-                    alt="Product preview"
-                    className="w-32 h-32 object-cover rounded-lg border-2 border-gray-200"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
+              
+              {/* Upload Area */}
+              <div className="space-y-4">
+                {/* File Input */}
+                <div className="flex items-center gap-4">
+                  <label 
+                    htmlFor="image-upload"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg border-2 border-blue-200 hover:bg-blue-100 cursor-pointer transition"
+                  >
+                    <Upload className="w-5 h-5" />
+                    <span className="font-medium">Choose Image</span>
+                  </label>
+                  <input
+                    id="image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="hidden"
                   />
+                  <span className="text-sm text-gray-500">
+                    {imageFile ? imageFile.name : 'No file chosen'}
+                  </span>
                 </div>
-              )}
+
+                {/* Image Preview */}
+                {imagePreview && (
+                  <div className="relative inline-block">
+                    <img
+                      src={imagePreview}
+                      alt="Product preview"
+                      className="w-48 h-48 object-cover rounded-lg border-2 border-gray-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleRemoveImage}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Upload Info */}
+                <div className="flex items-start gap-2 text-xs text-gray-500">
+                  <ImageIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p>Accepted formats: JPG, PNG, GIF, WEBP</p>
+                    <p>Maximum file size: 5MB</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Tags */}
@@ -475,16 +592,24 @@ const ProductEditPage = () => {
                 type="button"
                 onClick={handleBackClick}
                 className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-lg font-semibold transition"
-                disabled={submitting}
+                disabled={submitting || uploadingImage}
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 py-3 rounded-lg font-semibold transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={submitting}
+                disabled={submitting || uploadingImage}
               >
-                {submitting ? (
+                {uploadingImage ? (
+                  <span className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Uploading Image...
+                  </span>
+                ) : submitting ? (
                   <span className="flex items-center justify-center">
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

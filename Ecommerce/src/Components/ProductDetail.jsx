@@ -408,7 +408,7 @@ const ProductDetailPage = () => {
               <div className="mb-6">
                 {product.discount_percentage > 0 ? (
                   <div className="flex items-baseline gap-3">
-                    <span className="text-4xl font-bold text-green-600">₱{discountedPrice}</span>
+                    <span className="text-4xl font-bold text-[#a48a6d]">₱{discountedPrice}</span>
                     <span className="text-2xl text-gray-500 line-through">₱{product.price}</span>
                     <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
                       -{product.discount_percentage}% OFF
