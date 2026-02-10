@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
+import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, FileText, CreditCard } from 'lucide-react';
 
 // API base URL - adjust this to match your server
 const API_BASE_URL = 'http://localhost:5000/api'; // Change this to your actual API URL
@@ -18,6 +18,10 @@ const UserRegistration = ({ onBackToLogin }) => {
   const [imagePreview, setImagePreview] = useState(null);
   const [proofDocument, setProofDocument] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
+  const [validIdFront, setValidIdFront] = useState(null);
+  const [validIdFrontPreview, setValidIdFrontPreview] = useState(null);
+  const [validIdBack, setValidIdBack] = useState(null);
+  const [validIdBackPreview, setValidIdBackPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [success, setSuccess] = useState(false);
@@ -109,6 +113,78 @@ const UserRegistration = ({ onBackToLogin }) => {
     }
   };
 
+  const handleValidIdFrontChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({
+          ...prev,
+          validIdFront: 'Please select a valid image file'
+        }));
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({
+          ...prev,
+          validIdFront: 'Image size must be less than 5MB'
+        }));
+        return;
+      }
+
+      setValidIdFront(file);
+      setErrors(prev => ({
+        ...prev,
+        validIdFront: ''
+      }));
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setValidIdFrontPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleValidIdBackChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({
+          ...prev,
+          validIdBack: 'Please select a valid image file'
+        }));
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({
+          ...prev,
+          validIdBack: 'Image size must be less than 5MB'
+        }));
+        return;
+      }
+
+      setValidIdBack(file);
+      setErrors(prev => ({
+        ...prev,
+        validIdBack: ''
+      }));
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setValidIdBackPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
 
@@ -136,9 +212,17 @@ const UserRegistration = ({ onBackToLogin }) => {
       newErrors.phone = 'Please enter a valid phone number';
     }
 
-    // Require proof document for sellers
-    if (formData.role === 'seller' && !proofDocument) {
-      newErrors.document = 'Barangay certificate or proof of residence is required for sellers';
+    // Require documents for sellers
+    if (formData.role === 'seller') {
+      if (!proofDocument) {
+        newErrors.document = 'Barangay certificate or proof of residence is required for sellers';
+      }
+      if (!validIdFront) {
+        newErrors.validIdFront = 'Valid ID front photo is required for sellers';
+      }
+      if (!validIdBack) {
+        newErrors.validIdBack = 'Valid ID back photo is required for sellers';
+      }
     }
 
     return newErrors;
@@ -185,10 +269,21 @@ const UserRegistration = ({ onBackToLogin }) => {
         profileImageUrl = await uploadImage(profileImage);
       }
 
-      // Step 2: Upload proof document for sellers
+      // Step 2: Upload seller documents
       let proofDocumentUrl = null;
-      if (formData.role === 'seller' && proofDocument) {
-        proofDocumentUrl = await uploadImage(proofDocument);
+      let validIdFrontUrl = null;
+      let validIdBackUrl = null;
+
+      if (formData.role === 'seller') {
+        if (proofDocument) {
+          proofDocumentUrl = await uploadImage(proofDocument);
+        }
+        if (validIdFront) {
+          validIdFrontUrl = await uploadImage(validIdFront);
+        }
+        if (validIdBack) {
+          validIdBackUrl = await uploadImage(validIdBack);
+        }
       }
 
       // Step 3: Create user via API
@@ -200,7 +295,9 @@ const UserRegistration = ({ onBackToLogin }) => {
         phone: formData.phone || null,
         address: formData.address || null,
         profile_image: profileImageUrl,
-        proof_document: proofDocumentUrl // Add proof document to user data
+        proof_document: proofDocumentUrl,
+        valid_id_front: validIdFrontUrl,
+        valid_id_back: validIdBackUrl
       };
 
       const response = await fetch(`${API_BASE_URL}/users`, {
@@ -235,6 +332,10 @@ const UserRegistration = ({ onBackToLogin }) => {
       setImagePreview(null);
       setProofDocument(null);
       setDocumentPreview(null);
+      setValidIdFront(null);
+      setValidIdFrontPreview(null);
+      setValidIdBack(null);
+      setValidIdBackPreview(null);
 
     } catch (error) {
       console.error('Registration error:', error);
@@ -461,55 +562,161 @@ const UserRegistration = ({ onBackToLogin }) => {
           </select>
         </div>
 
-        {/* Proof Document Upload - Only for Sellers */}
+        {/* Seller Documents Section */}
         {formData.role === 'seller' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Barangay Certificate / Proof of Residence (Legazpi) *
-            </label>
-            <div className="mt-2 border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 transition duration-200">
-              <div className="flex flex-col items-center">
-                {documentPreview ? (
-                  <div className="relative w-full">
-                    <img 
-                      src={documentPreview} 
-                      alt="Document preview" 
-                      className="w-full h-48 object-contain rounded-md mb-2"
+          <div className="space-y-4 pt-4 border-t border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900">Seller Verification Documents</h3>
+            <p className="text-sm text-gray-600">Please upload the following documents for verification</p>
+
+            {/* Proof of Residence */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Barangay Certificate / Proof of Residence (Legazpi) *
+              </label>
+              <div className="mt-2 border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 transition duration-200">
+                <div className="flex flex-col items-center">
+                  {documentPreview ? (
+                    <div className="relative w-full">
+                      <img 
+                        src={documentPreview} 
+                        alt="Document preview" 
+                        className="w-full h-48 object-contain rounded-md mb-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProofDocument(null);
+                          setDocumentPreview(null);
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <FileText className="w-12 h-12 text-gray-400 mb-2" />
+                  )}
+                  <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-200 flex items-center">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {documentPreview ? 'Change Document' : 'Upload Document'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleDocumentChange}
+                      className="hidden"
                     />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProofDocument(null);
-                        setDocumentPreview(null);
-                      }}
-                      className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
-                  <FileText className="w-12 h-12 text-gray-400 mb-2" />
-                )}
-                <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-200 flex items-center">
-                  <Upload className="w-4 h-4 mr-2" />
-                  {documentPreview ? 'Change Document' : 'Upload Document'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleDocumentChange}
-                    className="hidden"
-                  />
-                </label>
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  Upload a clear photo of your Barangay Certificate or Proof of Residence in Legazpi
-                </p>
+                  </label>
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Clear photo of Barangay Certificate or Proof of Residence
+                  </p>
+                </div>
               </div>
+              {errors.document && (
+                <p className="text-red-500 text-sm mt-1">{errors.document}</p>
+              )}
             </div>
-            {errors.document && (
-              <p className="text-red-500 text-sm mt-1">{errors.document}</p>
-            )}
+
+            {/* Valid ID Front */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Valid ID (Front) *
+              </label>
+              <div className="mt-2 border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 transition duration-200">
+                <div className="flex flex-col items-center">
+                  {validIdFrontPreview ? (
+                    <div className="relative w-full">
+                      <img 
+                        src={validIdFrontPreview} 
+                        alt="ID Front preview" 
+                        className="w-full h-48 object-contain rounded-md mb-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setValidIdFront(null);
+                          setValidIdFrontPreview(null);
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <CreditCard className="w-12 h-12 text-gray-400 mb-2" />
+                  )}
+                  <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-200 flex items-center">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {validIdFrontPreview ? 'Change ID Front' : 'Upload ID Front'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleValidIdFrontChange}
+                      className="hidden"
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Front side of your Valid ID (Driver's License, National ID, Passport, etc.)
+                  </p>
+                </div>
+              </div>
+              {errors.validIdFront && (
+                <p className="text-red-500 text-sm mt-1">{errors.validIdFront}</p>
+              )}
+            </div>
+
+            {/* Valid ID Back */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Valid ID (Back) *
+              </label>
+              <div className="mt-2 border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 transition duration-200">
+                <div className="flex flex-col items-center">
+                  {validIdBackPreview ? (
+                    <div className="relative w-full">
+                      <img 
+                        src={validIdBackPreview} 
+                        alt="ID Back preview" 
+                        className="w-full h-48 object-contain rounded-md mb-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setValidIdBack(null);
+                          setValidIdBackPreview(null);
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <CreditCard className="w-12 h-12 text-gray-400 mb-2" />
+                  )}
+                  <label className="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-200 flex items-center">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {validIdBackPreview ? 'Change ID Back' : 'Upload ID Back'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleValidIdBackChange}
+                      className="hidden"
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Back side of your Valid ID
+                  </p>
+                </div>
+              </div>
+              {errors.validIdBack && (
+                <p className="text-red-500 text-sm mt-1">{errors.validIdBack}</p>
+              )}
+            </div>
           </div>
         )}
 

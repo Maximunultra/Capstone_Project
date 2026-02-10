@@ -131,7 +131,7 @@ const PromotionManagementPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen bg-orange-50 py-8 px-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
@@ -143,7 +143,7 @@ const PromotionManagementPage = () => {
           {userRole === 'seller' && (
             <button
               onClick={() => navigate('/seller/promotions/create')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+              className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
             >
               <span className="text-xl">+</span>
               New Promotion Request
@@ -152,7 +152,7 @@ const PromotionManagementPage = () => {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+        <div className="bg-white-100 p-4 mb-3">
           <div className="flex flex-wrap gap-2">
             {['all', 'pending', 'approved', 'active', 'rejected', 'expired'].map((status) => (
               <button
@@ -160,8 +160,8 @@ const PromotionManagementPage = () => {
                 onClick={() => setFilter(status)}
                 className={`px-4 py-2 rounded-lg font-medium transition ${
                   filter === status
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-orange-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
                 {status.charAt(0).toUpperCase() + status.slice(1)}

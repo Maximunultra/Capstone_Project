@@ -1,7 +1,27 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Mail, Lock, Scissors, Heart } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, Scissors, Heart, CheckCircle, AlertCircle, X } from 'lucide-react';
+
+// Toast Notification Component
+function Toast({ message, type, onClose }) {
+  const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-amber-500';
+  const Icon = type === 'success' ? CheckCircle : AlertCircle;
+
+  return (
+    <div className={`fixed top-4 right-4 ${bgColor} text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 z-50 max-w-md animate-in slide-in-from-right duration-300`}>
+      <Icon className="w-5 h-5 flex-shrink-0" />
+      <p className="flex-1 font-medium">{message}</p>
+      <button
+        onClick={onClose}
+        className="hover:bg-white/20 rounded-lg p-1 transition-colors duration-200"
+        aria-label="Close notification"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
 
 export default function Login({ onAuthChange }) {
   const [email, setEmail] = useState('');
@@ -9,10 +29,21 @@ export default function Login({ onAuthChange }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
+  const [toast, setToast] = useState(null);
   const navigate = useNavigate();
 
+  // Toast helper function
+  const showToast = (message, type = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000); // Auto-dismiss after 4 seconds
+  };
+
   const handleLogin = async () => {
-    if (!email || !password) return alert('Please enter email and password');
+    if (!email || !password) {
+      showToast('Please enter email and password', 'error');
+      return;
+    }
+    
     setLoading(true);
 
     try {
@@ -30,27 +61,30 @@ export default function Login({ onAuthChange }) {
           onAuthChange(true, user.role);
         }
         
-        alert(`Welcome, ${user.role.toUpperCase()}!`);
+        showToast(`Welcome back, ${user.role.charAt(0).toUpperCase() + user.role.slice(1)}!`, 'success');
         
-        switch (user.role) {
-          case 'admin':
-            navigate('/admin');
-            break;
-          case 'seller':
-            navigate('/seller');
-            break;
-          case 'buyer':
-            navigate('/buyer');
-            break;
-          default:
-            navigate('/login');
-            break;
-        }
+        // Delay navigation slightly to show success toast
+        setTimeout(() => {
+          switch (user.role) {
+            case 'admin':
+              navigate('/admin');
+              break;
+            case 'seller':
+              navigate('/seller');
+              break;
+            case 'buyer':
+              navigate('/buyer');
+              break;
+            default:
+              navigate('/login');
+              break;
+          }
+        }, 1000);
       } else {
-        alert('Invalid response from server.');
+        showToast('Invalid response from server', 'error');
       }
     } catch (err) {
-      alert(err.response?.data?.error || 'Login failed!');
+      showToast(err.response?.data?.error || 'Login failed! Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -65,6 +99,15 @@ export default function Login({ onAuthChange }) {
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50">
       
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       {/* Decorative Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-amber-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
@@ -79,10 +122,10 @@ export default function Login({ onAuthChange }) {
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl transform rotate-6 opacity-20"></div>
-              <div className="relative bg-gradient-to-br from-amber-50 to-orange-50 p-4 rounded-2xl">
-                <Scissors className="w-10 h-10 text-amber-700" strokeWidth={1.5} />
-              </div>
+              <div className="w-12 h-12 absolute inset-0 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl transform rotate-6 opacity-20"></div>
+              <div className="w-12 h-12 sm:w-10 sm:h-10 bg-gradient-to-br from-amber-600 to-orange-600 rounded-lg flex items-center justify-center shadow-md">
+            <span className="text-white font-bold text-sm sm:text-lg">A</span>
+          </div>
             </div>
           </div>
           <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent">

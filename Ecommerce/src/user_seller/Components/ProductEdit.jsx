@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Truck } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
@@ -23,6 +24,7 @@ const ProductEditPage = () => {
     brand: '',
     stock_quantity: '',
     discount_percentage: '',
+    shipping_fee: '', // ✅ NEW: Add shipping_fee to form state
     product_image: '',
     is_active: true,
     is_featured: false,
@@ -51,6 +53,7 @@ const ProductEditPage = () => {
         brand: data.brand || '',
         stock_quantity: data.stock_quantity || '',
         discount_percentage: data.discount_percentage || '',
+        shipping_fee: data.shipping_fee || '50.00', // ✅ NEW: Include shipping_fee
         product_image: data.product_image || '',
         is_active: data.is_active ?? true,
         is_featured: data.is_featured || false,
@@ -107,6 +110,11 @@ const ProductEditPage = () => {
       newErrors.discount_percentage = 'Discount must be between 0 and 100';
     }
 
+    // ✅ NEW: Validate shipping_fee
+    if (!formData.shipping_fee || parseFloat(formData.shipping_fee) < 0) {
+      newErrors.shipping_fee = 'Valid shipping fee is required (minimum ₱0)';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -132,6 +140,7 @@ const ProductEditPage = () => {
         brand: formData.brand.trim(),
         stock_quantity: parseInt(formData.stock_quantity),
         discount_percentage: formData.discount_percentage ? parseFloat(formData.discount_percentage) : 0,
+        shipping_fee: parseFloat(formData.shipping_fee) || 50.00, // ✅ NEW: Include shipping_fee
         product_image: formData.product_image.trim(),
         is_active: formData.is_active,
         is_featured: formData.is_featured,
@@ -252,7 +261,7 @@ const ProductEditPage = () => {
               {/* Price */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Price ($) <span className="text-red-500">*</span>
+                  Price (₱) <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
@@ -331,27 +340,58 @@ const ProductEditPage = () => {
               </div>
             </div>
 
-            {/* Discount */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Discount Percentage (%)
-              </label>
-              <input
-                type="number"
-                name="discount_percentage"
-                value={formData.discount_percentage}
-                onChange={handleChange}
-                step="0.01"
-                min="0"
-                max="100"
-                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.discount_percentage ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="0"
-              />
-              {errors.discount_percentage && (
-                <p className="mt-1 text-sm text-red-500">{errors.discount_percentage}</p>
-              )}
+            {/* Discount and Shipping Fee - Row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Discount */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Discount Percentage (%)
+                </label>
+                <input
+                  type="number"
+                  name="discount_percentage"
+                  value={formData.discount_percentage}
+                  onChange={handleChange}
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    errors.discount_percentage ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  placeholder="0"
+                />
+                {errors.discount_percentage && (
+                  <p className="mt-1 text-sm text-red-500">{errors.discount_percentage}</p>
+                )}
+              </div>
+
+              {/* ✅ NEW: Shipping Fee */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Shipping Fee (₱) <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                    <Truck className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="number"
+                    name="shipping_fee"
+                    value={formData.shipping_fee}
+                    onChange={handleChange}
+                    step="0.01"
+                    min="0"
+                    className={`w-full pl-12 pr-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      errors.shipping_fee ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                    placeholder="50.00"
+                  />
+                </div>
+                {errors.shipping_fee && (
+                  <p className="mt-1 text-sm text-red-500">{errors.shipping_fee}</p>
+                )}
+                <p className="mt-1 text-xs text-gray-500">Cost to ship this product per unit</p>
+              </div>
             </div>
 
             {/* Product Image URL */}
