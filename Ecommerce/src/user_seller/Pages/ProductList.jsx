@@ -15,9 +15,11 @@ const ProductListPage = ({ userId, userRole }) => {
     category: '',
     minPrice: '',
     maxPrice: '',
+    priceRange: 'all',
     isActive: 'all',
     isFeatured: 'all',
-    approvalStatus: 'all'
+    approvalStatus: 'all',
+    sortBy: 'newest'
   });
   const [pagination, setPagination] = useState({
     limit: 12,
@@ -58,7 +60,33 @@ const ProductListPage = ({ userId, userRole }) => {
       }
 
       const data = await response.json();
-      setProducts(data.products || []);
+      let fetchedProducts = data.products || [];
+
+      // Apply sorting
+      switch(filters.sortBy) {
+        case 'newest':
+          fetchedProducts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          break;
+        case 'oldest':
+          fetchedProducts.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          break;
+        case 'price-low':
+          fetchedProducts.sort((a, b) => a.price - b.price);
+          break;
+        case 'price-high':
+          fetchedProducts.sort((a, b) => b.price - a.price);
+          break;
+        case 'name-az':
+          fetchedProducts.sort((a, b) => a.product_name.localeCompare(b.product_name));
+          break;
+        case 'stock-high':
+          fetchedProducts.sort((a, b) => b.stock_quantity - a.stock_quantity);
+          break;
+        default:
+          break;
+      }
+
+      setProducts(fetchedProducts);
       setPagination(prev => ({ ...prev, total: data.total || 0 }));
     } catch (err) {
       setError(err.message);
@@ -231,15 +259,15 @@ const ProductListPage = ({ userId, userRole }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-4 sm:py-6 lg:py-8 px-3 sm:px-4 lg:px-6">
+      <div className="max-w-[1920px] mx-auto w-full">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-2">
+        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex-1">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-2">
               {currentUserRole === 'seller' ? 'My Products' : 'Product Management'}
             </h1>
-            <p className="text-gray-600">
+            <p className="text-sm sm:text-base text-gray-600">
               {currentUserRole === 'seller' 
                 ? 'Manage your product listings' 
                 : 'Review and approve product listings'}
@@ -250,7 +278,7 @@ const ProductListPage = ({ userId, userRole }) => {
           {currentUserRole === 'seller' && (
             <button
               onClick={() => setShowAddForm(true)}
-              className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+              className="w-full sm:w-auto bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-sm sm:text-base"
             >
               <span className="text-xl">+</span>
               Add New Product
@@ -259,124 +287,207 @@ const ProductListPage = ({ userId, userRole }) => {
 
           {/* Admin sees a different message */}
           {currentUserRole === 'admin' && (
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-6 py-3">
-              <p className="text-sm text-blue-800 font-medium">
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-4 sm:px-6 py-2.5 sm:py-3 w-full sm:w-auto">
+              <p className="text-xs sm:text-sm text-blue-800 font-medium text-center sm:text-left whitespace-nowrap">
                 👁️ View Only Mode - Approve/Reject Products
               </p>
             </div>
           )}
         </div>
 
-        {/* Filters Section */}
-        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Filters</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
-              <input
-                type="text"
-                name="search"
-                value={filters.search}
-                onChange={handleFilterChange}
-                placeholder="Search products..."
-                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
-              />
-            </div>
+        {/* Search and Sort Bar */}
+        <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 pb-4 sm:pb-6">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+            {/* Search Input */}
+            <input
+              type="text"
+              name="search"
+              value={filters.search}
+              onChange={handleFilterChange}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="Search products..."
+              className="flex-1 px-4 sm:px-6 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 placeholder-gray-400 transition-all duration-300"
+            />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <input
-                type="text"
-                name="category"
-                value={filters.category}
-                onChange={handleFilterChange}
-                placeholder="Category"
-                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
-              />
-            </div>
+            {/* Sort Dropdown */}
+            <select
+              name="sortBy"
+              value={filters.sortBy}
+              onChange={(e) => {
+                handleFilterChange(e);
+                setTimeout(handleSearch, 100);
+              }}
+              className="w-full sm:w-auto sm:min-w-[180px] lg:min-w-[200px] px-4 sm:px-6 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 cursor-pointer transition-all duration-300"
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="price-low">Price: Low to High</option>
+              <option value="price-high">Price: High to Low</option>
+              <option value="name-az">Name: A-Z</option>
+              <option value="stock-high">Stock: High to Low</option>
+            </select>
+          </div>
+        </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Min Price</label>
-              <input
-                type="number"
-                name="minPrice"
-                value={filters.minPrice}
-                onChange={handleFilterChange}
-                placeholder="0"
-                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Price</label>
-              <input
-                type="number"
-                name="maxPrice"
-                value={filters.maxPrice}
-                onChange={handleFilterChange}
-                placeholder="999"
-                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select
-                name="isActive"
-                value={filters.isActive}
-                onChange={handleFilterChange}
-                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
-              >
-                <option value="all">All</option>
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
-              </select>
-            </div>
-
-            {currentUserRole === 'admin' && (
+        {/* Filter Section with Dropdowns */}
+        <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 pb-6 sm:pb-8">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {/* Category Dropdown */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Approval</label>
+                <div className="flex items-center gap-2 mb-2 sm:mb-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                  <label className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                    Category
+                  </label>
+                </div>
                 <select
-                  name="approvalStatus"
-                  value={filters.approvalStatus}
-                  onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all duration-300"
+                  name="category"
+                  value={filters.category}
+                  onChange={(e) => {
+                    handleFilterChange(e);
+                    setTimeout(handleSearch, 100);
+                  }}
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 cursor-pointer transition-all duration-300"
                 >
-                  <option value="all">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
+                  <option value="">All Categories</option>
+                  <option value="Accessories">Accessories</option>
+                  <option value="Home Decor">Home Decor</option>
+                  <option value="Kitchen">Kitchen</option>
+                  <option value="Clothing">Clothing</option>
                 </select>
               </div>
-            )}
-          </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={handleSearch}
-              className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-6 py-2 rounded-xl transition-all duration-300 font-medium shadow-md hover:shadow-lg"
-            >
-              Apply Filters
-            </button>
-            <button
-              onClick={() => {
-                setFilters({
-                  search: '',
-                  category: '',
-                  minPrice: '',
-                  maxPrice: '',
-                  isActive: 'all',
-                  isFeatured: 'all',
-                  approvalStatus: 'all'
-                });
-                setPagination(prev => ({ ...prev, offset: 0 }));
-                setTimeout(fetchProducts, 100);
-              }}
-              className="bg-gray-200 text-gray-700 px-6 py-2 rounded-xl hover:bg-gray-300 transition-all duration-300 font-medium"
-            >
-              Clear
-            </button>
+              {/* Price Range Dropdown */}
+              <div>
+                <div className="flex items-center gap-2 mb-2 sm:mb-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <label className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                    Price Range
+                  </label>
+                </div>
+                <select
+                  name="priceRange"
+                  value={filters.priceRange}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    let minPrice = '';
+                    let maxPrice = '';
+                    
+                    if (value === 'under1000') {
+                      maxPrice = '1000';
+                    } else if (value === '1000-1500') {
+                      minPrice = '1000';
+                      maxPrice = '1500';
+                    } else if (value === '1500-2000') {
+                      minPrice = '1500';
+                      maxPrice = '2000';
+                    } else if (value === 'over2000') {
+                      minPrice = '2000';
+                    }
+                    
+                    setFilters(prev => ({
+                      ...prev,
+                      priceRange: value,
+                      minPrice,
+                      maxPrice
+                    }));
+                    setTimeout(handleSearch, 100);
+                  }}
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 cursor-pointer transition-all duration-300"
+                >
+                  <option value="all">All Prices</option>
+                  <option value="under1000">Under ₱1,000</option>
+                  <option value="1000-1500">₱1,000 - ₱1,500</option>
+                  <option value="1500-2000">₱1,500 - ₱2,000</option>
+                  <option value="over2000">Over ₱2,000</option>
+                </select>
+              </div>
+
+              {/* Status Dropdown */}
+              <div>
+                <div className="flex items-center gap-2 mb-2 sm:mb-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <label className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                    Status
+                  </label>
+                </div>
+                <select
+                  name="isActive"
+                  value={filters.isActive}
+                  onChange={(e) => {
+                    handleFilterChange(e);
+                    setTimeout(handleSearch, 100);
+                  }}
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 cursor-pointer transition-all duration-300"
+                >
+                  <option value="all">All Status</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+
+              {/* Approval Status Dropdown (Admin Only) */}
+              {currentUserRole === 'admin' && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2 sm:mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <label className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                      Approval
+                    </label>
+                  </div>
+                  <select
+                    name="approvalStatus"
+                    value={filters.approvalStatus}
+                    onChange={(e) => {
+                      handleFilterChange(e);
+                      setTimeout(handleSearch, 100);
+                    }}
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm sm:text-base text-gray-900 cursor-pointer transition-all duration-300"
+                  >
+                    <option value="all">All Approvals</option>
+                    <option value="pending">⏳ Pending</option>
+                    <option value="approved">✓ Approved</option>
+                    <option value="rejected">✗ Rejected</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Clear Filters Button */}
+            <div className="mt-4 sm:mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setFilters({
+                    search: '',
+                    category: '',
+                    minPrice: '',
+                    maxPrice: '',
+                    priceRange: 'all',
+                    isActive: 'all',
+                    isFeatured: 'all',
+                    approvalStatus: 'all',
+                    sortBy: 'newest'
+                  });
+                  setPagination(prev => ({ ...prev, offset: 0 }));
+                  setTimeout(fetchProducts, 100);
+                }}
+                className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl transition-all duration-300 font-medium shadow-md hover:shadow-lg text-sm sm:text-base"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Clear Filters
+              </button>
+            </div>
           </div>
         </div>
 
@@ -406,7 +517,7 @@ const ProductListPage = ({ userId, userRole }) => {
                 <p className="text-gray-500 mt-2">Try adjusting your filters</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
                 {products.map((product) => (
                   <div 
                     key={product.id} 
@@ -513,15 +624,15 @@ const ProductListPage = ({ userId, userRole }) => {
                         {product.discount_percentage > 0 ? (
                           <div>
                             <span className="text-base font-bold text-green-600">
-                              ${calculateDiscountedPrice(product.price, product.discount_percentage)}
+                              ₱{calculateDiscountedPrice(product.price, product.discount_percentage)}
                             </span>
                             <span className="text-xs text-gray-500 line-through ml-1">
-                              ${product.price}
+                              ₱{product.price}
                             </span>
                           </div>
                         ) : (
                           <span className="text-base font-bold text-gray-900">
-                            ${product.price}
+                            ₱{product.price}
                           </span>
                         )}
                       </div>
@@ -614,23 +725,23 @@ const ProductListPage = ({ userId, userRole }) => {
 
             {/* Pagination */}
             {products.length > 0 && (
-              <div className="mt-8 flex items-center justify-between bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4">
-                <div className="text-sm text-gray-600">
+              <div className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-center justify-between bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4 gap-4 sm:gap-0">
+                <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
                   Showing {pagination.offset + 1} - {Math.min(pagination.offset + pagination.limit, pagination.total)} of {pagination.total} products
                 </div>
                 
-                <div className="flex gap-2">
+                <div className="flex gap-2 w-full sm:w-auto">
                   <button
                     onClick={prevPage}
                     disabled={pagination.offset === 0}
-                    className="px-4 py-2 border-2 border-gray-300 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2 border-2 border-gray-300 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 text-sm sm:text-base"
                   >
                     Previous
                   </button>
                   <button
                     onClick={nextPage}
                     disabled={pagination.offset + pagination.limit >= pagination.total}
-                    className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 text-sm sm:text-base"
                   >
                     Next
                   </button>

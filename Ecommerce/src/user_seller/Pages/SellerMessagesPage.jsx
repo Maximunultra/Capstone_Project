@@ -11,8 +11,8 @@ import {
   Loader2
 } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5000/api';
-// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const SellerMessagesPage = () => {
   const [conversations, setConversations] = useState([]);
@@ -185,9 +185,9 @@ const SellerMessagesPage = () => {
   const ConversationsList = () => (
     <div className="h-full flex flex-col bg-white border-r border-gray-200">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+      <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-yellow-50">
         <h1 className="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <MessageCircle className="w-6 h-6 text-blue-600" />
+          <MessageCircle className="w-6 h-6 text-orange-600" />
           Messages
         </h1>
         
@@ -208,11 +208,11 @@ const SellerMessagesPage = () => {
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+            <Loader2 className="w-8 h-8 text-orange-600 animate-spin" />
           </div>
         ) : filteredConversations.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8">
-            <MessageCircle className="w-16 h-16 mb-4 text-gray-300" />
+          <div className="flex flex-col items-center justify-center h-full text-orange-500 p-8">
+            <MessageCircle className="w-16 h-16 mb-4 text-orange-300" />
             <p className="text-lg font-medium">No messages yet</p>
             <p className="text-sm text-center mt-2">
               {searchQuery 
@@ -233,7 +233,7 @@ const SellerMessagesPage = () => {
                 }}
                 className={`w-full p-4 text-left hover:bg-gray-50 transition ${
                   selectedConversation?.other_user_id === conv.other_user_id
-                    ? 'bg-blue-50 border-l-4 border-blue-600'
+                    ? 'bg-blue-50 border-l-4 border-orange-600'
                     : ''
                 }`}
               >

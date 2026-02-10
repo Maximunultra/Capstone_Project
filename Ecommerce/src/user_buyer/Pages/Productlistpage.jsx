@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const Productlistpage = ({ userId, userRole }) => {
   const navigate = useNavigate();
@@ -55,59 +55,64 @@ const Productlistpage = ({ userId, userRole }) => {
     { id: 'price-high', label: 'Price: High to Low' },
     { id: 'popular', label: 'Most Popular' },
   ];
+// UPDATED: Productlistpage.jsx - Add buyer_view parameter to API call
 
-  const fetchProducts = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      params.append('limit', pagination.limit);
-      params.append('offset', pagination.offset);
-      
-      if (searchQuery) params.append('search', searchQuery);
-      if (selectedCategory !== 'all') params.append('category', selectedCategory);
-      
-      const priceRange = priceRanges.find(r => r.id === selectedPriceRange);
-      if (priceRange && priceRange.id !== 'all') {
-        if (priceRange.min > 0) params.append('min_price', priceRange.min);
-        if (priceRange.max !== Infinity) params.append('max_price', priceRange.max);
-      }
+// Find the fetchProducts function and update it like this:
 
-      const response = await fetch(`${API_BASE_URL}/products?${params}`);
-      if (!response.ok) throw new Error('Failed to fetch products');
-      const data = await response.json();
-      
-      let sortedProducts = data.products || [];
-      
-      // Apply sorting
-      switch(sortBy) {
-        case 'newest':
-          sortedProducts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-          break;
-        case 'price-low':
-          sortedProducts.sort((a, b) => a.price - b.price);
-          break;
-        case 'price-high':
-          sortedProducts.sort((a, b) => b.price - a.price);
-          break;
-        case 'popular':
-          sortedProducts.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0));
-          break;
-        case 'featured':
-        default:
-          sortedProducts.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0));
-          break;
-      }
-      
-      setProducts(sortedProducts);
-      setPagination(prev => ({ ...prev, total: data.total || 0 }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+const fetchProducts = async () => {
+  setLoading(true);
+  setError(null);
+  try {
+    const params = new URLSearchParams();
+    params.append('limit', pagination.limit);
+    params.append('offset', pagination.offset);
+    
+    // ✅ NEW: Add buyer_view flag to only show approved products
+    params.append('buyer_view', 'true');
+    
+    if (searchQuery) params.append('search', searchQuery);
+    if (selectedCategory !== 'all') params.append('category', selectedCategory);
+    
+    const priceRange = priceRanges.find(r => r.id === selectedPriceRange);
+    if (priceRange && priceRange.id !== 'all') {
+      if (priceRange.min > 0) params.append('min_price', priceRange.min);
+      if (priceRange.max !== Infinity) params.append('max_price', priceRange.max);
     }
-  };
 
+    const response = await fetch(`${API_BASE_URL}/products?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch products');
+    const data = await response.json();
+    
+    let sortedProducts = data.products || [];
+    
+    // Apply sorting
+    switch(sortBy) {
+      case 'newest':
+        sortedProducts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        break;
+      case 'price-low':
+        sortedProducts.sort((a, b) => a.price - b.price);
+        break;
+      case 'price-high':
+        sortedProducts.sort((a, b) => b.price - a.price);
+        break;
+      case 'popular':
+        sortedProducts.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0));
+        break;
+      case 'featured':
+      default:
+        sortedProducts.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0));
+        break;
+    }
+    
+    setProducts(sortedProducts);
+    setPagination(prev => ({ ...prev, total: data.total || 0 }));
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
   useEffect(() => {
     fetchProducts();
   }, [pagination.offset, pagination.limit, selectedCategory, selectedPriceRange, sortBy, searchQuery]);
