@@ -1,7 +1,71 @@
 import express from "express";
 import { supabase } from "../server.js";
+import crypto from "crypto";
 
 const router = express.Router();
+
+// Encryption configuration
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+
+// ✅ FIXED: Convert hex string to Buffer
+const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY 
+  ? Buffer.from(process.env.MESSAGE_ENCRYPTION_KEY, 'hex')
+  : crypto.randomBytes(32);
+
+const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
+
+// 🧪 Verify key is loaded correctly
+console.log('🔐 Encryption enabled:', !!process.env.MESSAGE_ENCRYPTION_KEY);
+console.log('🔑 Key buffer length:', ENCRYPTION_KEY.length, 'bytes (should be 32)');
+
+/**
+ * Encrypt a message
+ */
+function encryptMessage(text) {
+  try {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    
+    const authTag = cipher.getAuthTag();
+    
+    // Combine IV + authTag + encrypted text
+    return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
+  } catch (error) {
+    console.error('❌ Encryption error:', error);
+    throw new Error('Failed to encrypt message');
+  }
+}
+
+/**
+ * Decrypt a message
+ */
+function decryptMessage(encryptedText) {
+  try {
+    const parts = encryptedText.split(':');
+    if (parts.length !== 3) {
+      throw new Error('Invalid encrypted message format');
+    }
+    
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    decipher.setAuthTag(authTag);
+    
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted;
+  } catch (error) {
+    console.error('❌ Decryption error:', error);
+    return '[Encrypted Message]'; // Fallback for corrupted data
+  }
+}
 
 /**
  * POST /api/messages
@@ -11,6 +75,7 @@ router.post("/", async (req, res) => {
   try {
     const { sender_id, receiver_id, message, order_id, product_id } = req.body;
 
+    console.log('📨 Original message:', message);
     console.log('📨 Sending message:', { 
       sender_id, 
       receiver_id, 
@@ -92,21 +157,22 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // Insert message into database
-    // IMPORTANT: sender_id and receiver_id are UUIDs, so pass them as strings
+    // 🔐 ENCRYPT THE MESSAGE
+    const encryptedMessage = encryptMessage(message);
+    console.log('🔒 Encrypted message:', encryptedMessage);
+
     const messageData = {
       sender_id: sender_id.toString(),
       receiver_id: receiver_id.toString(),
-      message: message,
+      message: encryptedMessage, // ← Should be encrypted
       order_id: order_id ? parseInt(order_id) : null,
       product_id: product_id ? parseInt(product_id) : null,
       is_read: false,
       created_at: new Date().toISOString()
     };
 
-    console.log('💾 Inserting message:', messageData);
+    console.log('💾 Storing in DB:', messageData.message.substring(0, 50) + '...');
 
-    // FIXED: Don't select user details, just insert the message
     const { data: newMessage, error: insertError } = await supabase
       .from("messages")
       .insert([messageData])
@@ -126,10 +192,18 @@ router.post("/", async (req, res) => {
 
     console.log('✅ Message sent successfully');
 
+     // 🔓 DECRYPT BEFORE SENDING TO CLIENT
+    const decryptedMessage = {
+      ...newMessage,
+      message: decryptMessage(newMessage.message)
+    };
+
+    console.log('📤 Sending to client (decrypted):', decryptedMessage.message);
+
     res.status(201).json({
       success: true,
       message: 'Message sent successfully',
-      data: newMessage
+      data: decryptedMessage
     });
 
   } catch (error) {
@@ -170,10 +244,16 @@ router.get("/conversation/:userId1/:userId2", async (req, res) => {
 
     console.log(`✅ Found ${data.length} messages`);
 
+    // 🔓 DECRYPT ALL MESSAGES
+    const decryptedMessages = data.map(msg => ({
+      ...msg,
+      message: decryptMessage(msg.message)
+    }));
+
     res.json({
       success: true,
-      messages: data,
-      count: data.length
+      messages: decryptedMessages,
+      count: decryptedMessages.length
     });
 
   } catch (error) {
@@ -212,7 +292,7 @@ router.get("/user/:userId", async (req, res) => {
       userIds.add(msg.receiver_id);
     });
 
-    // Fetch user details (try different possible column names)
+    // Fetch user details
     const { data: users, error: usersError } = await supabase
       .from("users")
       .select('id, full_name, email')
@@ -237,12 +317,15 @@ router.get("/user/:userId", async (req, res) => {
       const otherUserId = msg.sender_id === userId ? msg.receiver_id : msg.sender_id;
       const otherUser = userMap.get(otherUserId);
 
+      // 🔓 DECRYPT MESSAGE FOR PREVIEW
+      const decryptedMessage = decryptMessage(msg.message);
+
       if (!conversationsMap.has(otherUserId)) {
         conversationsMap.set(otherUserId, {
           other_user_id: otherUserId,
           other_user_name: otherUser?.full_name || 'Unknown User',
           other_user_email: otherUser?.email || '',
-          last_message: msg.message,
+          last_message: decryptedMessage,
           last_message_time: msg.created_at,
           unread_count: 0,
           messages: []
@@ -250,7 +333,12 @@ router.get("/user/:userId", async (req, res) => {
       }
 
       const conversation = conversationsMap.get(otherUserId);
-      conversation.messages.push(msg);
+      
+      // Store decrypted message
+      conversation.messages.push({
+        ...msg,
+        message: decryptedMessage
+      });
       
       // Count unread messages received by this user
       if (msg.receiver_id === userId && !msg.is_read) {
@@ -298,10 +386,16 @@ router.get("/order/:orderId", async (req, res) => {
 
     console.log(`✅ Found ${data.length} messages for order`);
 
+    // 🔓 DECRYPT ALL MESSAGES
+    const decryptedMessages = data.map(msg => ({
+      ...msg,
+      message: decryptMessage(msg.message)
+    }));
+
     res.json({
       success: true,
-      messages: data,
-      count: data.length
+      messages: decryptedMessages,
+      count: decryptedMessages.length
     });
 
   } catch (error) {
@@ -346,10 +440,16 @@ router.patch("/:messageId/read", async (req, res) => {
 
     console.log('✅ Message marked as read');
 
+    // 🔓 DECRYPT BEFORE SENDING TO CLIENT
+    const decryptedData = {
+      ...data,
+      message: decryptMessage(data.message)
+    };
+
     res.json({ 
       success: true,
       message: 'Message marked as read',
-      data
+      data: decryptedData
     });
 
   } catch (error) {
