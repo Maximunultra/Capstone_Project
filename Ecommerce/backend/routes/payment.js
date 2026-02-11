@@ -188,7 +188,7 @@ async function createGCashPayment(amount, description, billing) {
           attributes: {
             payment_method: paymentMethod.id,
             client_key: paymentIntent.attributes.client_key,
-            return_url: `${FRONTEND_URL}/buyer/checkout?payment_success=true&payment_intent_id=${paymentIntent.id}`
+            return_url: `${FRONTEND_URL.replace(/\/$/, '')}/buyer/checkout?payment_success=true&payment_intent_id=${paymentIntent.id}`
           }
         }
       },
@@ -252,7 +252,7 @@ async function createPayPalPayment(amount, description) {
           brand_name: 'Your Store',
           landing_page: 'NO_PREFERENCE',
           user_action: 'PAY_NOW',
-          return_url: `${FRONTEND_URL}/buyer/checkout?payment_success=true&payment_method=paypal`,
+          return_url: `${FRONTEND_URL.replace(/\/$/, '')}/buyer/checkout?payment_success=true&payment_method=paypal`,
           cancel_url: `${FRONTEND_URL}/buyer/checkout?payment_success=false`
         }
       },
