@@ -27,8 +27,10 @@ import analyticsRoutes from "./routes/analytics.js";
 import paymentRoutes from "./routes/payment.js";
 import messageRoutes from "./routes/messages.js"; // NEW: Message routes
 import feedbackRoutes from './routes/feedback.js';
+import adminAnalyticsRoutes from './routes/admin-analytics.js';
 
 // Routes
+app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use("/api/analytics", analyticsRoutes);  
 app.use("/api/orders", orderRoutes);
@@ -443,5 +445,5 @@ app.listen(port, () => {
   console.log(`✅ Server running on http://localhost:${port}`);
   console.log(`📧 Email service: ${process.env.EMAIL_USER ? 'configured' : 'not configured'}`);
   console.log(`💳 PayMongo: ${process.env.PAYMONGO_SECRET_KEY ? 'configured' : 'not configured'}`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL}`);
 });
