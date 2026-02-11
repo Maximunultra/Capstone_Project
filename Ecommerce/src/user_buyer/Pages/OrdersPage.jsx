@@ -125,7 +125,7 @@ const OrdersPage = ({ userId }) => {
       'processing': 'bg-blue-100 text-blue-800 border-blue-200',
       'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
       'delivered': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-      'cancelled': 'bg-red-100 text-red-800 border-red-200'
+      'canceled': 'bg-red-100 text-red-800 border-red-200'
     };
     return colors[status] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
@@ -140,7 +140,7 @@ const OrdersPage = ({ userId }) => {
         return <Truck className="w-4 h-4" />;
       case 'delivered':
         return <CheckCircle className="w-4 h-4" />;
-      case 'cancelled':
+      case 'canceled':
         return (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -157,7 +157,7 @@ const OrdersPage = ({ userId }) => {
       'processing': 50,
       'shipped': 75,
       'delivered': 100,
-      'cancelled': 0
+      'canceled': 0
     };
     return progressMap[status] || 0;
   };
@@ -195,10 +195,10 @@ const OrdersPage = ({ userId }) => {
         throw new Error(errorData.error || 'Failed to cancel order');
       }
 
-      alert('Order cancelled successfully');
+      alert('Order canceled successfully');
       fetchOrders();
     } catch (err) {
-      alert('Error cancelling order: ' + err.message);
+      alert('Error canceling order: ' + err.message);
     }
   };
 
@@ -208,7 +208,7 @@ const OrdersPage = ({ userId }) => {
     processing: orders.filter(o => o.order_status === 'processing').length,
     shipped: orders.filter(o => o.order_status === 'shipped').length,
     delivered: orders.filter(o => o.order_status === 'delivered').length,
-    cancelled: orders.filter(o => o.order_status === 'cancelled').length
+    canceled: orders.filter(o => o.order_status === 'canceled').length
   };
 
   if (loading && orders.length === 0) {
@@ -234,7 +234,7 @@ const OrdersPage = ({ userId }) => {
               { key: 'processing', label: 'Processing' },
               { key: 'shipped', label: 'Shipped' },
               { key: 'delivered', label: 'Delivered' },
-              { key: 'cancelled', label: 'Cancelled' }
+              { key: 'canceled', label: 'Canceled' }
             ].map(({ key, label }) => (
               <button
                 key={key}
@@ -489,11 +489,6 @@ const OrdersPage = ({ userId }) => {
                                   </div>
                                 </div>
                               </div>
-
-                              {/* <div className="text-right">
-                                <p className="text-sm text-gray-600 mb-1">Subtotal</p>
-                                <p className="text-xl font-bold text-gray-900">₱{parseFloat(item.subtotal).toFixed(2)}</p>
-                              </div> */}
                             </div>
                           </div>
                         ))}

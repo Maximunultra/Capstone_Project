@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign, ShoppingBag } from 'lucide-react';
 
 // API Base URL - Update this to your actual API endpoint
-const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const SellerOrderManagement = () => {
   const [orders, setOrders] = useState([]);
@@ -204,6 +205,12 @@ const SellerOrderManagement = () => {
     return `₱${parseFloat(amount).toFixed(2)}`;
   };
 
+  // Calculate total items in order
+  const getTotalItems = (orderItems) => {
+    if (!orderItems || orderItems.length === 0) return 0;
+    return orderItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
       {/* Header */}
@@ -276,6 +283,7 @@ const SellerOrderManagement = () => {
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Order ID</th>
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Customer</th>
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Items</th>
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Amount</th>
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Payment</th>
@@ -288,6 +296,7 @@ const SellerOrderManagement = () => {
                     const statusConfig = getStatusConfig(order.order_status);
                     const paymentConfig = getPaymentStatusConfig(order.payment_status);
                     const StatusIcon = statusConfig.icon;
+                    const totalItems = getTotalItems(order.order_items);
                     
                     return (
                       <tr
@@ -306,6 +315,12 @@ const SellerOrderManagement = () => {
                         </td>
                         <td className="px-6 py-4 text-gray-600">
                           {formatDate(order.order_date)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">
+                            <ShoppingBag size={14} />
+                            {totalItems} {totalItems === 1 ? 'item' : 'items'}
+                          </span>
                         </td>
                         <td className="px-6 py-4 font-bold text-gray-900">
                           {formatCurrency(order.total_amount)}
@@ -360,11 +375,11 @@ const SellerOrderManagement = () => {
           onClick={closeOrderDetails}
         >
           <div
-            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl"
+            className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-8 py-6 border-b-2 border-gray-100 flex justify-between items-center bg-gradient-to-r from-amber-50 to-orange-50">
+            <div className="px-8 py-6 border-b-2 border-gray-100 flex justify-between items-center bg-gradient-to-r from-amber-50 to-orange-50 sticky top-0 z-10">
               <div>
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
                   Order Details
@@ -383,6 +398,79 @@ const SellerOrderManagement = () => {
 
             {/* Modal Body */}
             <div className="p-8 space-y-6">
+              {/* Order Items Section */}
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <ShoppingBag size={16} />
+                  Order Items ({getTotalItems(selectedOrder.order_items)} items)
+                </h3>
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl overflow-hidden">
+                  {selectedOrder.order_items && selectedOrder.order_items.length > 0 ? (
+                    <div className="divide-y divide-amber-200">
+                      {selectedOrder.order_items.map((item, index) => (
+                        <div key={index} className="p-4 flex gap-4 hover:bg-white/50 transition-colors">
+                          {/* Product Image */}
+                          <div className="flex-shrink-0">
+                            {item.product_image ? (
+                              <img
+                                src={item.product_image}
+                                alt={item.product_name}
+                                className="w-20 h-20 object-cover rounded-lg border-2 border-amber-200"
+                              />
+                            ) : (
+                              <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-amber-200">
+                                <Package size={32} className="text-gray-400" />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Product Details */}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-bold text-gray-900 mb-1 truncate">
+                              {item.product_name}
+                            </h4>
+                            <div className="flex flex-wrap gap-2 text-sm text-gray-600 mb-2">
+                              {item.product_category && (
+                                <span className="inline-flex items-center px-2 py-1 bg-white rounded-md border border-amber-200">
+                                  <span className="font-medium">Category:</span>
+                                  <span className="ml-1">{item.product_category}</span>
+                                </span>
+                              )}
+                              {item.product_brand && (
+                                <span className="inline-flex items-center px-2 py-1 bg-white rounded-md border border-amber-200">
+                                  <span className="font-medium">Brand:</span>
+                                  <span className="ml-1">{item.product_brand}</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 text-sm">
+                              <span className="text-gray-600">
+                                <span className="font-medium">Quantity:</span> {item.quantity}
+                              </span>
+                              <span className="text-gray-600">
+                                <span className="font-medium">Unit Price:</span> {formatCurrency(item.unit_price)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Item Subtotal */}
+                          <div className="flex-shrink-0 text-right">
+                            <p className="text-xs text-gray-500 mb-1">Subtotal</p>
+                            <p className="text-lg font-bold text-gray-900">
+                              {formatCurrency(item.subtotal)}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-gray-500">
+                      No items found in this order
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Customer Information */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">

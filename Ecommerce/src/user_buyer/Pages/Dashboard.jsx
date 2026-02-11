@@ -35,6 +35,7 @@ const BuyerDashboard = ({ userId, userRole }) => {
       const params = new URLSearchParams();
       params.append('limit', 6);
       params.append('offset', 0);
+      params.append('buyer_view', 'true'); // ✅ Only fetch approved and active products
       
       if (selectedCategory !== 'all') {
         params.append('category', selectedCategory);

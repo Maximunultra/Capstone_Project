@@ -257,7 +257,7 @@ const OrderDetailsPage = () => {
                   </button>
                 )}
                 
-                {/* Message Seller Button - Show for all orders except cancelled */}
+                Message Seller Button - Show for all orders except cancelled
                 {canMessageSeller() && (
                   <button
                     onClick={() => {
