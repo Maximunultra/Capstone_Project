@@ -13,7 +13,7 @@ const CheckoutPage = ({ userId }) => {
   const [processingPayment, setProcessingPayment] = useState(false);
 
   // ✅ PRICING CONSTANTS
-  const PLATFORM_FEE_PERCENTAGE = 0.03; // 3% platform commission (YOUR system's revenue)
+  const PLATFORM_FEE_PERCENTAGE = 0.10; // 3% platform commission (YOUR system's revenue)
   const MINIMUM_SHIPPING_FEE = 100; // ₱100 minimum
   const MINIMUM_PRODUCTS_FOR_DISCOUNT = 3; // Apply minimum fee when 3+ products
 
