@@ -84,7 +84,7 @@ const App = () => {
           <PrivateRoute isAuthenticated={isAuthenticated} allowedRole="admin" userRole={userRole}>
             <AdminLayout>
               <Routes>
-                <Route path="/" element={<AdminDashboard />} />
+                <Route path="/" element={<Navigate to="/admin/analytics" replace />} />
                 <Route path="/dashboard" element={<AdminDashboard />} />
                 
                 {/* Admin Product Routes */}

@@ -26,7 +26,7 @@ const UserProfileEdit = () => {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/users/${id}`);
+        const res = await fetch(`https://capstone-project-1msq.onrender.com/api/users/${id}`);
         if (!res.ok) throw new Error('User not found');
         const user = await res.json();
         setFormData({

@@ -23,11 +23,11 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
 
   const navItems = [
     // { to: `/${rolePrefix}`, label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
+        { to: `/${rolePrefix}/analytics`, label: "Analytics Dashboard", icon: <BarChart4 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     // { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     // { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
-    { to: `/${rolePrefix}/analytics`, label: "Analytics", icon: <BarChart4 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/users`, label: "Sellers", icon: <Users className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
   ];
 

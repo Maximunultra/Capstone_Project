@@ -20,7 +20,7 @@ const UsersManager = () => {
       setLoading(true);
       setError('');
       
-      const response = await axios.get('http://localhost:5000/api/users');
+      const response = await axios.get('https://capstone-project-1msq.onrender.com/api/users');
       setUsers(response.data.users || response.data || []);
     } catch (err) {
       console.error('Error fetching users:', err);
@@ -36,7 +36,7 @@ const UsersManager = () => {
 
   const fetchUser = async (userId) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/users/${userId}`);
+      const response = await axios.get(`https://capstone-project-1msq.onrender.com/api/users/${userId}`);
       setSelectedUser(response.data.user || response.data);
       setShowUserModal(true);
     } catch (err) {
@@ -51,7 +51,7 @@ const UsersManager = () => {
 
   const updateApprovalStatus = async (userId, status) => {
     try {
-      await axios.patch(`http://localhost:5000/api/users/${userId}/approval`, {
+      await axios.patch(`https://capstone-project-1msq.onrender.com/api/users/${userId}/approval`, {
         approval_status: status
       });
       alert(`Seller ${status} successfully!`);
@@ -73,7 +73,7 @@ const UsersManager = () => {
     if (!confirm('Are you sure you want to delete this user?')) return;
     
     try {
-      await axios.delete(`http://localhost:5000/api/users/${userId}`);
+      await axios.delete(`https://capstone-project-1msq.onrender.com/api/users/${userId}`);
       alert('User deleted successfully');
       fetchUsers();
     } catch (err) {

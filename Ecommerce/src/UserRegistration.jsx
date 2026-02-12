@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, FileText, CreditCard } from 'lucide-react';
 
 // API base URL - adjust this to match your server
-const API_BASE_URL = 'http://localhost:5000/api'; // Change this to your actual API URL
-
+// const API_BASE_URL = 'http://localhost:5000/api'; 
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api'; 
 const UserRegistration = ({ onBackToLogin }) => {
   const [formData, setFormData] = useState({
     fullName: '',
