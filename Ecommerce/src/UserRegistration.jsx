@@ -345,6 +345,15 @@ const UserRegistration = ({ onBackToLogin }) => {
     }
   };
 
+  const handleBackToLogin = () => {
+    if (onBackToLogin) {
+      onBackToLogin();
+    } else {
+      // If no callback provided, you can navigate using window.location
+      window.location.href = '/login';
+    }
+  };
+
   if (success) {
     return (
       <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
@@ -364,24 +373,15 @@ const UserRegistration = ({ onBackToLogin }) => {
             )}
           </p>
           <button
-            onClick={() => setSuccess(false)}
+            onClick={handleBackToLogin}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200"
           >
-            Register Another User
+            Back to Login
           </button>
         </div>
       </div>
     );
   }
-
-  const handleBackToLogin = () => {
-    if (onBackToLogin) {
-      onBackToLogin();
-    } else {
-      // If no callback provided, you can navigate using window.location
-      window.location.href = '/login';
-    }
-  };
 
   return (
     <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
