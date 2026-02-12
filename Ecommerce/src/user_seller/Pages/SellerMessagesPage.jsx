@@ -51,6 +51,17 @@ const SellerMessagesPage = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Auto-refresh conversations every 10 seconds to keep unread count updated
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!selectedConversation) {
+        fetchConversations();
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [selectedConversation]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -104,6 +115,9 @@ const SellerMessagesPage = () => {
             : conv
         )
       );
+
+      // Trigger a storage event to notify other components (like Sidebar)
+      window.dispatchEvent(new Event('messagesRead'));
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
@@ -181,6 +195,9 @@ const SellerMessagesPage = () => {
     conv.other_user_email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Calculate total unread count for display
+  const totalUnreadCount = conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+
   // ==========================================
   // RENDER
   // ==========================================
@@ -193,10 +210,17 @@ const SellerMessagesPage = () => {
           <div className="w-1/3 max-w-md">
             <div className="h-full flex flex-col bg-white border-r border-gray-200">
               <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-yellow-50">
-                <h1 className="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <MessageCircle className="w-6 h-6 text-orange-600" />
-                  Messages
-                </h1>
+                <div className="flex items-center justify-between mb-4">
+                  <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <MessageCircle className="w-6 h-6 text-orange-600" />
+                    Messages
+                  </h1>
+                  {totalUnreadCount > 0 && (
+                    <span className="px-3 py-1 bg-red-500 text-white text-sm font-bold rounded-full">
+                      {totalUnreadCount}
+                    </span>
+                  )}
+                </div>
                 
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -238,13 +262,18 @@ const SellerMessagesPage = () => {
                         }`}
                       >
                         <div className="flex items-start gap-3">
-                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold flex-shrink-0">
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold flex-shrink-0 relative">
                             {conv.other_user_name?.charAt(0)?.toUpperCase() || 'U'}
+                            {conv.unread_count > 0 && (
+                              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold border-2 border-white">
+                                {conv.unread_count > 9 ? '9+' : conv.unread_count}
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                              <h3 className="font-semibold text-gray-900 truncate">
+                              <h3 className={`font-semibold truncate ${conv.unread_count > 0 ? 'text-gray-900' : 'text-gray-700'}`}>
                                 {conv.other_user_name || 'Unknown User'}
                               </h3>
                               <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
@@ -252,7 +281,7 @@ const SellerMessagesPage = () => {
                               </span>
                             </div>
                             
-                            <p className="text-sm text-gray-600 truncate mb-1">
+                            <p className={`text-sm truncate mb-1 ${conv.unread_count > 0 ? 'text-gray-900 font-semibold' : 'text-gray-600'}`}>
                               {conv.last_message}
                             </p>
                             
@@ -345,7 +374,6 @@ const SellerMessagesPage = () => {
                   )}
                 </div>
 
-                {/* ✅ THE FIX: Inline input, not in a function */}
                 <div className="p-4 border-t border-gray-200 bg-white">
                   <div className="flex gap-2">
                     <input
@@ -389,13 +417,19 @@ const SellerMessagesPage = () => {
         <>
           {!selectedConversation ? (
             <div className="w-full">
-              {/* Mobile Conversations List - Same as desktop */}
               <div className="h-full flex flex-col bg-white">
                 <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-yellow-50">
-                  <h1 className="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <MessageCircle className="w-6 h-6 text-orange-600" />
-                    Messages
-                  </h1>
+                  <div className="flex items-center justify-between mb-4">
+                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                      <MessageCircle className="w-6 h-6 text-orange-600" />
+                      Messages
+                    </h1>
+                    {totalUnreadCount > 0 && (
+                      <span className="px-3 py-1 bg-red-500 text-white text-sm font-bold rounded-full">
+                        {totalUnreadCount}
+                      </span>
+                    )}
+                  </div>
                   
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -417,14 +451,19 @@ const SellerMessagesPage = () => {
                       className="w-full p-4 text-left hover:bg-gray-50 transition border-b border-gray-100"
                     >
                       <div className="flex items-start gap-3">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold relative">
                           {conv.other_user_name?.charAt(0)?.toUpperCase() || 'U'}
+                          {conv.unread_count > 0 && (
+                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold border-2 border-white">
+                              {conv.unread_count > 9 ? '9+' : conv.unread_count}
+                            </span>
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 truncate">
+                          <h3 className={`font-semibold truncate ${conv.unread_count > 0 ? 'text-gray-900' : 'text-gray-700'}`}>
                             {conv.other_user_name || 'Unknown User'}
                           </h3>
-                          <p className="text-sm text-gray-600 truncate">
+                          <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-gray-900 font-semibold' : 'text-gray-600'}`}>
                             {conv.last_message}
                           </p>
                         </div>

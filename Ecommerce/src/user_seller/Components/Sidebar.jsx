@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -14,28 +14,70 @@ import {
   X
 } from 'lucide-react';
 
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+
 const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   const location = useLocation();
   const currentPath = location.pathname;
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Get the role prefix from localStorage or props
   const rolePrefix = userRole || JSON.parse(localStorage.getItem("user") || '{}').role || 'buyer';
+  const currentUserId = JSON.parse(localStorage.getItem("user") || '{}').id;
 
   const navItems = [
-    // { to: `/${rolePrefix}`, label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/analytics`, label: "Analytics Dashboard", icon: <BarChart4 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
-    { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
-    
-    // { to: `/${rolePrefix}/users`, label: "Sellers", icon: <Users className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
+    { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />, hasNotification: true },
   ];
+
+  // Fetch unread message count
+  const fetchUnreadCount = async () => {
+    if (!currentUserId) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/messages/user/${currentUserId}`);
+      const data = await response.json();
+      
+      if (data.success && data.conversations) {
+        // Calculate total unread messages from all conversations
+        const totalUnread = data.conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+        setUnreadCount(totalUnread);
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    }
+  };
+
+  // Fetch unread count on component mount and set up polling
+  useEffect(() => {
+    fetchUnreadCount();
+    
+    // Poll for new messages every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    
+    return () => clearInterval(interval);
+  }, [currentUserId]);
+
+  // Refresh unread count when navigating away from messages page
+  useEffect(() => {
+    if (!currentPath.includes('/messages')) {
+      fetchUnreadCount();
+    }
+  }, [currentPath]);
 
   const handleNavClick = () => {
     // Auto-close sidebar on mobile after navigation
     if (isMobile) {
       toggleSidebar();
+    }
+    
+    // If navigating to messages, reset unread count immediately
+    if (currentPath.includes('/messages')) {
+      setUnreadCount(0);
     }
   };
 
@@ -98,6 +140,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
                   transition-all 
                   duration-200
                   text-sm sm:text-base
+                  relative
                   ${
                     currentPath === item.to
                       ? "bg-white font-semibold shadow-sm text-amber-700"
@@ -108,6 +151,21 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
               >
                 {item.icon}
                 <span className="truncate">{item.label}</span>
+                
+                {/* Notification Badge */}
+                {item.hasNotification && unreadCount > 0 && (
+                  <>
+                    {/* Show count if more than 0 */}
+                    {unreadCount > 0 && (
+                      <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
+                    
+                    {/* Alternative: Just show a red dot (uncomment this and comment out the count above if you prefer) */}
+                    {/* <span className="ml-auto w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span> */}
+                  </>
+                )}
               </Link>
             </li>
           ))}
