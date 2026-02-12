@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Package, CheckCircle, ShoppingBag, Mail } from 'lucide-react';
 import OrdersPage from './OrdersPage';
-import MessagesTab from './MessagesTab'; // IMPORT THE MESSAGES TAB HERE
+import MessagesTab from './MessagesTab';
 
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 // const API_BASE_URL = 'http://localhost:5000/api';
 
 const CartPage = ({ userId }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('cart');
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +18,15 @@ const CartPage = ({ userId }) => {
   const [hasChanges, setHasChanges] = useState(false);
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
+
+  // Check URL parameters for tab
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab && ['cart', 'orders', 'messages'].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [location.search]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -155,6 +165,12 @@ const CartPage = ({ userId }) => {
     navigate('/buyer/products');
   };
 
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    // Update URL without page reload
+    navigate(`/buyer/cart?tab=${tab}`, { replace: true });
+  };
+
   if (loading && cartItems.length === 0 && activeTab === 'cart') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30 flex items-center justify-center">
@@ -191,7 +207,7 @@ const CartPage = ({ userId }) => {
             ].map(({ id, label, icon: Icon, count }) => (
               <button
                 key={id}
-                onClick={() => setActiveTab(id)}
+                onClick={() => handleTabChange(id)}
                 className={`flex-1 px-6 py-4 font-semibold transition flex items-center justify-center gap-2 relative ${
                   activeTab === id
                     ? 'text-blue-600 bg-blue-50'
@@ -488,7 +504,7 @@ const CartPage = ({ userId }) => {
             <OrdersPage userId={currentUserId} />
           )}
 
-          {/* Messages Tab - THIS IS WHERE YOU PUT IT */}
+          {/* Messages Tab */}
           {activeTab === 'messages' && (
             <MessagesTab userId={currentUserId} />
           )}

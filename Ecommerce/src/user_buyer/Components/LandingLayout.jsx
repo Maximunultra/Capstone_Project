@@ -6,6 +6,7 @@ const API_BASE_URL = 'http://localhost:5000/api';
 const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) => {
   const navigate = useNavigate();
   const [cartCount, setCartCount] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
   const [userId, setUserId] = useState(null);
   const [userName, setUserName] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -20,12 +21,16 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
       setUserId(userData.id);
       setUserName(userData.full_name || userData.name || 'User');
       
-      // Fetch cart count if user is a buyer
+      // Fetch cart count and message count if user is a buyer
       if (userData.role === 'buyer') {
         fetchCartCount(userData.id);
+        fetchMessageCount(userData.id);
         
-        // Set up interval to refresh cart count every 30 seconds
-        const interval = setInterval(() => fetchCartCount(userData.id), 30000);
+        // Set up interval to refresh counts every 30 seconds
+        const interval = setInterval(() => {
+          fetchCartCount(userData.id);
+          fetchMessageCount(userData.id);
+        }, 30000);
         return () => clearInterval(interval);
       }
     }
@@ -55,9 +60,29 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
     }
   };
 
+  const fetchMessageCount = async (uid) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/messages/user/${uid}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.conversations) {
+          // Calculate total unread messages
+          const totalUnread = data.conversations.reduce(
+            (sum, conv) => sum + (conv.unread_count || 0), 
+            0
+          );
+          setMessageCount(totalUnread);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching message count:', error);
+    }
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem('user');
     setCartCount(0);
+    setMessageCount(0);
     setUserId(null);
     setUserName('');
     setShowDropdown(false);
@@ -76,6 +101,17 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
     }
     setMobileMenuOpen(false);
     navigate('/buyer/cart');
+  };
+
+  const handleMessagesClick = () => {
+    if (!isAuthenticated || userRole !== 'buyer') {
+      alert('Please login as a buyer to view your messages');
+      navigate('/login');
+      return;
+    }
+    setMobileMenuOpen(false);
+    // Navigate to cart page with messages tab active
+    navigate('/buyer/cart?tab=messages');
   };
 
   const handleProfileClick = () => {
@@ -121,17 +157,27 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
 
             {/* Desktop Action Icons - Hidden on mobile */}
             <div className="hidden md:flex items-center gap-3 lg:gap-6">
-              {/* Search Icon */}
-              {/* <button className="text-[#5c5042] hover:text-[#c08a4b] transition p-2">
+              {/* Messages Icon with Badge */}
+              <button 
+                onClick={handleMessagesClick}
+                className="text-[#5c5042] hover:text-[#c08a4b] transition relative p-2"
+                title="Messages"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 lg:h-6 lg:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
-              </button> */}
+                {isAuthenticated && userRole === 'buyer' && messageCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center animate-pulse">
+                    {messageCount > 99 ? '99+' : messageCount}
+                  </span>
+                )}
+              </button>
               
               {/* Cart Icon with Badge */}
               <button 
                 onClick={handleCartClick}
                 className="text-[#5c5042] hover:text-[#c08a4b] transition relative p-2"
+                title="Shopping Cart"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 lg:h-6 lg:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -203,10 +249,27 @@ const LandingLayout = ({ children, onAuthChange, isAuthenticated, userRole }) =>
 
             {/* Mobile Menu Icons - Visible only on mobile/tablet */}
             <div className="flex md:hidden items-center gap-3">
+              {/* Messages Icon for Mobile */}
+              <button 
+                onClick={handleMessagesClick}
+                className="text-[#5c5042] hover:text-[#c08a4b] transition relative p-2"
+                title="Messages"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                {isAuthenticated && userRole === 'buyer' && messageCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center animate-pulse">
+                    {messageCount > 99 ? '99+' : messageCount}
+                  </span>
+                )}
+              </button>
+
               {/* Cart Icon for Mobile */}
               <button 
                 onClick={handleCartClick}
                 className="text-[#5c5042] hover:text-[#c08a4b] transition relative p-2"
+                title="Shopping Cart"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
