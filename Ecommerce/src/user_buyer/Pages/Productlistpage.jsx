@@ -405,7 +405,12 @@ const fetchProducts = async () => {
                     <h3 className="font-semibold text-[#a48a6d] mb-1.5 sm:mb-2 text-xs sm:text-sm line-clamp-2 min-h-[32px] sm:min-h-[40px]" title={product.product_name}>
                       {product.product_name}
                     </h3>
-
+                    {/* Product Description - NEW */}
+                    {product.description && (
+                      <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2 min-h-[28px] sm:min-h-[32px]" title={product.description}>
+                          {product.description}
+                        </p>
+                    )}
                     {product.category && (
                       <p className="text-[10px] sm:text-xs text-gray-500 mb-1.5 sm:mb-2 truncate">{product.category}</p>
                     )}
@@ -442,7 +447,7 @@ const fetchProducts = async () => {
                       <div className="flex gap-1.5 sm:gap-2">
                         <button
                           onClick={(e) => openModal(product, 'cart', e)}
-                          className="flex-shrink-0 bg-white border-2 border-gray-300 hover:border-blue-500 hover:bg-blue-50 text-gray-700 hover:text-blue-600 p-1.5 sm:p-2 md:p-2.5 rounded-lg transition-all duration-200 touch-manipulation"
+                          className="flex-shrink-0 bg-white border-2  border-[#d4cdc3] hover:border-[#a48a6d] hover:bg-[#ebe5dc] text-gray-700 hover:text-[#a48a6d] p-1.5 sm:p-2 md:p-2.5 rounded-lg transition-all duration-200 touch-manipulation"
                           title="Add to Cart"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -452,7 +457,7 @@ const fetchProducts = async () => {
 
                         <button
                           onClick={(e) => openModal(product, 'buynow', e)}
-                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1.5 sm:py-2 md:py-2.5 px-2 sm:px-3 md:px-4 rounded-lg transition-all duration-200 text-[10px] sm:text-xs md:text-sm font-medium touch-manipulation"
+                          className="flex-1 bg-[#a48a6d] hover:bg-[#8b7355]  text-white py-1.5 sm:py-2 md:py-2.5 px-2 sm:px-3 md:px-4 rounded-lg transition-all duration-200 text-[10px] sm:text-xs md:text-sm font-medium touch-manipulation"
                         >
                           Buy Now
                         </button>
