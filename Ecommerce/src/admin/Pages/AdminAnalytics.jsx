@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const AdminAnalytics = () => {
   const [loading, setLoading] = useState(true);
@@ -31,6 +31,7 @@ const AdminAnalytics = () => {
   const [categoryData, setCategoryData] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
   const [topSellers, setTopSellers] = useState([]);
+  const [sellersPayment, setSellersPayment] = useState([]);
 
   useEffect(() => {
     const run = async () => {
@@ -42,7 +43,8 @@ const AdminAnalytics = () => {
           fetchSalesData(selectedYear),
           fetchCategoryData(),
           fetchTopProducts(),
-          fetchTopSellers()
+          fetchTopSellers(),
+          fetchSellersPayment()
         ]);
       } catch (err) {
         console.error('Error loading analytics:', err);
@@ -94,6 +96,16 @@ const AdminAnalytics = () => {
       if (json.success && json.data) setTopSellers(json.data);
     } catch (e) {
       setTopSellers([]);
+    }
+  };
+
+  const fetchSellersPayment = async () => {
+    try {
+      const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/sellers-by-payment`);
+      if (json.success && json.data) setSellersPayment(json.data);
+    } catch (e) {
+      console.error('Error fetching sellers payment:', e);
+      setSellersPayment([]);
     }
   };
 
@@ -266,7 +278,7 @@ const AdminAnalytics = () => {
       </div>
 
       {/* Bottom Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900 mb-6">Categories</h3>
           {categoryData.length > 0 ? categoryData.map((cat, i) => (
@@ -311,6 +323,90 @@ const AdminAnalytics = () => {
             </div>
           )) : <p className="text-gray-500 text-sm">No data</p>}
         </div>
+      </div>
+
+      {/* Sellers Payment Method Table */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Seller Payment Breakdown</h3>
+          <p className="text-sm text-gray-500">Orders and revenue by payment method for each seller</p>
+        </div>
+
+        {sellersPayment.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b-2 border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Seller</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Orders</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Revenue</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Orders</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Revenue</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Orders</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sellersPayment.map((seller, i) => (
+                  <tr key={i} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-4">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{seller.seller_name}</p>
+                        <p className="text-xs text-gray-500">{seller.seller_email}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        seller.gcash_orders > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {seller.gcash_orders}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <span className={`text-sm font-medium ${
+                        parseFloat(seller.gcash_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
+                      }`}>
+                        {formatCurrency(seller.gcash_revenue)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        seller.paypal_orders > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {seller.paypal_orders}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <span className={`text-sm font-medium ${
+                        parseFloat(seller.paypal_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
+                      }`}>
+                        {formatCurrency(seller.paypal_revenue)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center bg-blue-50">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-900">
+                        {seller.total_orders}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right bg-blue-50">
+                      <span className="text-sm font-bold text-blue-900">
+                        {formatCurrency(seller.total_revenue)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <p className="text-gray-500 font-medium">No seller payment data available</p>
+            <p className="text-gray-400 text-sm mt-1">Data will appear once sellers have delivered orders</p>
+          </div>
+        )}
       </div>
 
       {loading && (
