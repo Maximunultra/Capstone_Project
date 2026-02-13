@@ -13,7 +13,7 @@ const CheckoutPage = ({ userId }) => {
   const [processingPayment, setProcessingPayment] = useState(false);
 
   // ✅ PRICING CONSTANTS
-  const PLATFORM_FEE_PERCENTAGE = 0.10; // 3% platform commission (YOUR system's revenue)
+  const PLATFORM_FEE_PERCENTAGE = 0.10; // 10% platform commission (YOUR system's revenue)
   const MINIMUM_SHIPPING_FEE = 100; // ₱100 minimum
   const MINIMUM_PRODUCTS_FOR_DISCOUNT = 3; // Apply minimum fee when 3+ products
 
@@ -505,7 +505,7 @@ const CheckoutPage = ({ userId }) => {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Barangay*</label>
                   <input type="text" name="address" value={shippingInfo.address} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -532,11 +532,11 @@ const CheckoutPage = ({ userId }) => {
                 <h3 className="font-bold text-gray-900 mb-4">💰 Fee Information</h3>
                 <div className="space-y-4 text-sm text-gray-600">
                   <div className="flex gap-3">
-                    <Info className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                    <div>
+                    {/* <Info className="h-5 w-5 text-blue-500 flex-shrink-0" /> */}
+                    {/* <div>
                       <p className="font-medium text-gray-900">Platform Fee (3%)</p>
                       <p className="text-xs">Service charge for using our marketplace</p>
-                    </div>
+                    </div> */}
                   </div>
                   <div className="flex gap-3">
                     <Info className="h-5 w-5 text-blue-500 flex-shrink-0" />
