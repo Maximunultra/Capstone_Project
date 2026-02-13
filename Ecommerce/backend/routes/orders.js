@@ -568,6 +568,7 @@ router.post("/", async (req, res) => {
       shipping_fee,
       total,
       payment_intent_id,
+      payment_capture_id, // ✅ ADD THIS LINE
       payment_status
     } = req.body;
 
@@ -607,29 +608,39 @@ router.post("/", async (req, res) => {
     console.log('✅ Shipping information encrypted');
 
     const orderData = {
-      order_number: orderNumber,
-      user_id: user_id,
-      shipping_full_name: encryptedShipping.fullName,
-      shipping_email: encryptedShipping.email,
-      shipping_phone: encryptedShipping.phone,
-      shipping_address: encryptedShipping.address,
-      shipping_city: encryptedShipping.city,
-      shipping_province: encryptedShipping.province,
-      shipping_postal_code: encryptedShipping.postalCode,
-      subtotal: parseFloat(subtotal),
-      tax: parseFloat(tax),
-      shipping_fee: parseFloat(shipping_fee) || 0,
-      total_amount: parseFloat(total),
-      payment_method: payment_method,
-      payment_status: finalPaymentStatus,
-      payment_intent_id: payment_intent_id || null,
-      order_status: 'pending',
-      tracking_number: null,
-      order_date: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
+  order_number: orderNumber,
+  user_id: user_id,
+  
+  // Shipping info (encrypted)
+  shipping_full_name: encryptedShipping.fullName,
+  shipping_email: encryptedShipping.email,
+  shipping_phone: encryptedShipping.phone,
+  shipping_address: encryptedShipping.address,
+  shipping_city: encryptedShipping.city,
+  shipping_province: encryptedShipping.province,
+  shipping_postal_code: encryptedShipping.postalCode,
+  
+  // Amounts
+  subtotal: parseFloat(subtotal),
+  tax: parseFloat(tax),
+  shipping_fee: parseFloat(shipping_fee) || 0,
+  total_amount: parseFloat(total),
+  
+  // Payment
+  payment_method: payment_method,
+  payment_status: finalPaymentStatus,
+  payment_intent_id: payment_intent_id || null,
+  payment_capture_id: payment_capture_id || null, // ✅ ADD THIS LINE
+  
+  // Order status
+  order_status: 'pending',
+  tracking_number: null,
+  
+  // Timestamps
+  order_date: new Date().toISOString(),
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString()
+};
     console.log('💾 Creating order in database...');
 
     const { data: order, error: orderError } = await supabase

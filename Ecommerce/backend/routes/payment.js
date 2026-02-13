@@ -408,4 +408,51 @@ router.get('/verify-payment/:paymentIntentId', async (req, res) => {
   }
 });
 
+/**
+ * GET - Verify PayPal transaction details
+ */
+router.get('/verify-paypal/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    console.log('🔍 Verifying PayPal transaction:', orderId);
+    
+    const accessToken = await getPayPalAccessToken();
+    
+    const response = await axios.get(
+      `${PAYPAL_API_URL}/v2/checkout/orders/${orderId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const order = response.data;
+    
+    res.json({
+      success: true,
+      order_id: order.id,
+      status: order.status,
+      amount: order.purchase_units[0].amount.value,
+      currency: order.purchase_units[0].amount.currency_code,
+      payer: {
+        name: order.payer?.name ? `${order.payer.name.given_name} ${order.payer.name.surname}` : 'N/A',
+        email: order.payer?.email_address || 'N/A'
+      },
+      created_at: order.create_time,
+      updated_at: order.update_time,
+      captures: order.purchase_units[0].payments?.captures || []
+    });
+
+  } catch (error) {
+    console.error('❌ PayPal verification error:', error.response?.data || error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Verification failed',
+      details: error.response?.data || error.message
+    });
+  }
+});
 export default router;
