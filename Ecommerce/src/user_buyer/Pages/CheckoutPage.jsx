@@ -313,64 +313,70 @@ const CheckoutPage = ({ userId }) => {
     }
   }, []);
 
-  const processPayPalOrder = async (orderData, token) => {
-    try {
-      setLoading(true);
-      
-      const captureResponse = await fetch(`${API_BASE_URL}/payment/capture-paypal/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
+ const processPayPalOrder = async (orderData, token) => {
+  try {
+    setLoading(true);
+    
+    console.log('💙 Capturing PayPal payment...');
+    
+    // Capture the PayPal payment
+    const captureResponse = await fetch(`${API_BASE_URL}/payment/capture-paypal/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
 
-      if (!captureResponse.ok) {
-        const errorData = await captureResponse.json();
-        throw new Error(errorData.error || 'Failed to capture PayPal payment');
-      }
-
-      const captureData = await captureResponse.json();
-
-      const requestData = {
-        user_id: orderData.user_id,
-        shipping_info: orderData.shipping_info,
-        payment_method: 'paypal',
-        cart_items: orderData.cart_items,
-        subtotal: orderData.subtotal,
-        tax: orderData.tax, // Platform fee stored as "tax"
-        shipping_fee: orderData.shipping_fee,
-        total: orderData.total,
-        payment_intent_id: token,
-        payment_status: 'paid'
-      };
-
-      const response = await fetch(`${API_BASE_URL}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to process order');
-      }
-
-      const data = await response.json();
-
-      setOrderConfirmation({
-        orderNumber: data.order.order_number,
-        orderId: data.order.id,
-        date: new Date(data.order.order_date).toLocaleDateString(),
-        ...requestData
-      });
-
-      setCurrentStep(4);
-      setLoading(false);
-
-    } catch (error) {
-      console.error('❌ PayPal order processing failed:', error);
-      alert('Failed to process PayPal payment. Error: ' + error.message);
-      setLoading(false);
+    if (!captureResponse.ok) {
+      const errorData = await captureResponse.json();
+      throw new Error(errorData.error || 'Failed to capture PayPal payment');
     }
-  };
+
+    const captureData = await captureResponse.json();
+    console.log('✅ PayPal captured:', captureData);
+
+    // Create order with BOTH Order ID and Capture ID
+    const requestData = {
+      user_id: orderData.user_id,
+      shipping_info: orderData.shipping_info,
+      payment_method: 'paypal',
+      cart_items: orderData.cart_items,
+      subtotal: orderData.subtotal,
+      tax: orderData.tax,
+      shipping_fee: orderData.shipping_fee,
+      total: orderData.total,
+      payment_intent_id: token, // PayPal Order ID
+      payment_capture_id: captureData.capture_id, // ✅ ADD THIS LINE - PayPal Capture ID
+      payment_status: 'paid'
+    };
+
+    const response = await fetch(`${API_BASE_URL}/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to process order');
+    }
+
+    const data = await response.json();
+
+    setOrderConfirmation({
+      orderNumber: data.order.order_number,
+      orderId: data.order.id,
+      date: new Date(data.order.order_date).toLocaleDateString(),
+      ...requestData
+    });
+
+    setCurrentStep(4);
+    setLoading(false);
+
+  } catch (error) {
+    console.error('❌ PayPal order processing failed:', error);
+    alert('Failed to process PayPal payment. Error: ' + error.message);
+    setLoading(false);
+  }
+};
 
   const processOrderWithData = async (orderData, paymentIntentId) => {
     try {
