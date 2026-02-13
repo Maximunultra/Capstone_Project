@@ -1,9 +1,126 @@
 import express from "express";
 import { supabase } from "../server.js";
+import crypto from "crypto";
 
 const router = express.Router();
 
-// Helper function to generate order number
+// ================================================================
+// 🔐 ENCRYPTION CONFIGURATION
+// ================================================================
+
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+
+// ✅ Use the SAME key as messages for consistency
+// OR create a separate ORDER_ENCRYPTION_KEY in .env
+const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY 
+  ? Buffer.from(process.env.MESSAGE_ENCRYPTION_KEY, 'hex')
+  : crypto.randomBytes(32);
+
+const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
+
+console.log('🔐 Order encryption enabled:', !!process.env.MESSAGE_ENCRYPTION_KEY);
+console.log('🔑 Key buffer length:', ENCRYPTION_KEY.length, 'bytes (should be 32)');
+
+/**
+ * 🔒 Encrypt sensitive data
+ */
+function encrypt(text) {
+  if (!text) return null;
+  
+  try {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    
+    const authTag = cipher.getAuthTag();
+    
+    // Format: IV:AuthTag:EncryptedText
+    return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
+  } catch (error) {
+    console.error('❌ Encryption error:', error);
+    throw new Error('Failed to encrypt data');
+  }
+}
+
+/**
+ * 🔓 Decrypt sensitive data
+ */
+function decrypt(encryptedText) {
+  if (!encryptedText) return null;
+  
+  try {
+    const parts = encryptedText.split(':');
+    if (parts.length !== 3) {
+      console.warn('⚠️ Invalid encrypted format, returning as-is');
+      return encryptedText; // Fallback for unencrypted legacy data
+    }
+    
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    decipher.setAuthTag(authTag);
+    
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted;
+  } catch (error) {
+    console.error('❌ Decryption error:', error);
+    return '[Encrypted Data]'; // Fallback
+  }
+}
+
+/**
+ * 🔒 Encrypt order shipping information
+ * Encrypts: full_name, email, phone, address, city, province, postal_code
+ */
+function encryptShippingInfo(shippingInfo) {
+  return {
+    fullName: encrypt(shippingInfo.fullName),
+    email: encrypt(shippingInfo.email),
+    phone: encrypt(shippingInfo.phone),
+    address: encrypt(shippingInfo.address),
+    city: encrypt(shippingInfo.city),
+    province: encrypt(shippingInfo.province),
+    postalCode: shippingInfo.postalCode ? encrypt(shippingInfo.postalCode) : null
+  };
+}
+
+/**
+ * 🔓 Decrypt order shipping information
+ */
+function decryptShippingInfo(order) {
+  if (!order) return null;
+  
+  return {
+    ...order,
+    shipping_full_name: decrypt(order.shipping_full_name),
+    shipping_email: decrypt(order.shipping_email),
+    shipping_phone: decrypt(order.shipping_phone),
+    shipping_address: decrypt(order.shipping_address),
+    shipping_city: decrypt(order.shipping_city),
+    shipping_province: decrypt(order.shipping_province),
+    shipping_postal_code: order.shipping_postal_code ? decrypt(order.shipping_postal_code) : null
+  };
+}
+
+/**
+ * 🔓 Decrypt multiple orders
+ */
+function decryptOrders(orders) {
+  if (!orders || orders.length === 0) return orders;
+  return orders.map(order => decryptShippingInfo(order));
+}
+
+// ================================================================
+// Helper function to generate order number (unchanged)
+// ================================================================
+
 const generateOrderNumber = () => {
   const timestamp = Date.now();
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -11,7 +128,7 @@ const generateOrderNumber = () => {
 };
 
 // ================================================================
-// ✅ Analytics Update Functions (unchanged from original)
+// Analytics Update Functions (unchanged from original)
 // ================================================================
 
 async function updateAnalyticsOnDelivery(order) {
@@ -296,14 +413,14 @@ async function reverseAnalyticsOnCancellation(order) {
 }
 
 // ================================================================
-// ✅ UPDATED: GET All Orders with Seller Filtering
+// 🆕 ENCRYPTED GET All Orders with Seller Filtering
 // ================================================================
 
 router.get("/", async (req, res) => {
   try {
     const { 
       status, 
-      seller_id, // NEW: Filter orders containing seller's products
+      seller_id,
       limit = 50, 
       offset = 0, 
       sort = 'desc' 
@@ -344,13 +461,11 @@ router.get("/", async (req, res) => {
 
     let filteredOrders = data;
 
-    // IMPORTANT: Filter orders by seller if seller_id is provided
+    // Filter orders by seller if seller_id is provided
     if (seller_id) {
       console.log('🔒 Filtering orders for seller:', seller_id);
       
-      // Filter orders that contain at least one product from this seller
       filteredOrders = data.filter(order => {
-        // Check if any order item belongs to this seller
         return order.order_items && order.order_items.some(item => {
           return item.product && item.product.user_id === seller_id;
         });
@@ -359,12 +474,15 @@ router.get("/", async (req, res) => {
       console.log(`✅ Filtered ${filteredOrders.length} orders for seller ${seller_id} (from ${data.length} total)`);
     }
 
-    console.log(`✅ Fetched ${filteredOrders.length} orders`);
+    // 🔓 DECRYPT shipping information before sending to client
+    const decryptedOrders = decryptOrders(filteredOrders);
+
+    console.log(`✅ Fetched and decrypted ${decryptedOrders.length} orders`);
 
     res.json({
       success: true,
-      orders: filteredOrders,
-      total: filteredOrders.length
+      orders: decryptedOrders,
+      total: decryptedOrders.length
     });
   } catch (error) {
     console.error("❌ Error fetching all orders:", error);
@@ -376,7 +494,7 @@ router.get("/", async (req, res) => {
 });
 
 // ================================================================
-// Rest of the routes (unchanged from original)
+// Dashboard Stats (no decryption needed - only aggregates)
 // ================================================================
 
 router.get("/stats/dashboard", async (req, res) => {
@@ -433,6 +551,10 @@ router.get("/stats/dashboard", async (req, res) => {
   }
 });
 
+// ================================================================
+// 🆕 ENCRYPTED POST - Create Order with Encrypted Shipping Info
+// ================================================================
+
 router.post("/", async (req, res) => {
   try {
     console.log('📝 Create order request received');
@@ -479,16 +601,21 @@ router.post("/", async (req, res) => {
       productCategoryMap[p.id] = p.category;
     });
 
+    // 🔒 ENCRYPT SHIPPING INFORMATION
+    console.log('🔒 Encrypting shipping information...');
+    const encryptedShipping = encryptShippingInfo(shipping_info);
+    console.log('✅ Shipping information encrypted');
+
     const orderData = {
       order_number: orderNumber,
       user_id: user_id,
-      shipping_full_name: shipping_info.fullName,
-      shipping_email: shipping_info.email,
-      shipping_phone: shipping_info.phone,
-      shipping_address: shipping_info.address,
-      shipping_city: shipping_info.city,
-      shipping_province: shipping_info.province,
-      shipping_postal_code: shipping_info.postalCode || null,
+      shipping_full_name: encryptedShipping.fullName,
+      shipping_email: encryptedShipping.email,
+      shipping_phone: encryptedShipping.phone,
+      shipping_address: encryptedShipping.address,
+      shipping_city: encryptedShipping.city,
+      shipping_province: encryptedShipping.province,
+      shipping_postal_code: encryptedShipping.postalCode,
       subtotal: parseFloat(subtotal),
       tax: parseFloat(tax),
       shipping_fee: parseFloat(shipping_fee) || 0,
@@ -576,11 +703,14 @@ router.post("/", async (req, res) => {
       console.log('✅ Cart cleared');
     }
 
+    // 🔓 DECRYPT before sending to client
+    const decryptedOrder = decryptShippingInfo(order);
+
     res.status(201).json({
       success: true,
       message: "Order created successfully",
       order: {
-        ...order,
+        ...decryptedOrder,
         items: items
       }
     });
@@ -593,6 +723,10 @@ router.post("/", async (req, res) => {
     });
   }
 });
+
+// ================================================================
+// 🆕 ENCRYPTED GET User Orders
+// ================================================================
 
 router.get("/user/:userId", async (req, res) => {
   try {
@@ -626,10 +760,13 @@ router.get("/user/:userId", async (req, res) => {
 
     if (error) throw error;
 
+    // 🔓 DECRYPT shipping information
+    const decryptedOrders = decryptOrders(data);
+
     res.json({
       success: true,
-      orders: data,
-      total: data.length
+      orders: decryptedOrders,
+      total: decryptedOrders.length
     });
   } catch (error) {
     console.error("❌ Error fetching orders:", error);
@@ -639,6 +776,10 @@ router.get("/user/:userId", async (req, res) => {
     });
   }
 });
+
+// ================================================================
+// 🆕 ENCRYPTED GET Single Order by ID
+// ================================================================
 
 router.get("/:orderId", async (req, res) => {
   try {
@@ -670,7 +811,10 @@ router.get("/:orderId", async (req, res) => {
       });
     }
 
-    const orderStatus = data.order_status.toLowerCase();
+    // 🔓 DECRYPT shipping information
+    const decryptedOrder = decryptShippingInfo(data);
+
+    const orderStatus = decryptedOrder.order_status.toLowerCase();
     const permissions = {
       can_cancel: ['pending', 'processing'].includes(orderStatus),
       can_message_seller: ['pending', 'processing', 'shipped'].includes(orderStatus)
@@ -678,7 +822,7 @@ router.get("/:orderId", async (req, res) => {
 
     res.json({
       success: true,
-      order: data,
+      order: decryptedOrder,
       permissions
     });
   } catch (error) {
@@ -689,6 +833,10 @@ router.get("/:orderId", async (req, res) => {
     });
   }
 });
+
+// ================================================================
+// 🆕 ENCRYPTED GET Order by Order Number
+// ================================================================
 
 router.get("/number/:orderNumber", async (req, res) => {
   try {
@@ -718,7 +866,10 @@ router.get("/number/:orderNumber", async (req, res) => {
       });
     }
 
-    const orderStatus = data.order_status.toLowerCase();
+    // 🔓 DECRYPT shipping information
+    const decryptedOrder = decryptShippingInfo(data);
+
+    const orderStatus = decryptedOrder.order_status.toLowerCase();
     const permissions = {
       can_cancel: ['pending', 'processing'].includes(orderStatus),
       can_message_seller: ['pending', 'processing', 'shipped'].includes(orderStatus)
@@ -726,7 +877,7 @@ router.get("/number/:orderNumber", async (req, res) => {
 
     res.json({
       success: true,
-      order: data,
+      order: decryptedOrder,
       permissions
     });
   } catch (error) {
@@ -737,6 +888,11 @@ router.get("/number/:orderNumber", async (req, res) => {
     });
   }
 });
+
+// ================================================================
+// Rest of the routes (status updates, payment, tracking, etc.)
+// These don't need encryption changes
+// ================================================================
 
 router.patch("/:orderId/status", async (req, res) => {
   try {
@@ -826,10 +982,13 @@ router.patch("/:orderId/status", async (req, res) => {
       await reverseAnalyticsOnCancellation({ ...data, order_items: currentOrder.order_items });
     }
 
+    // 🔓 DECRYPT before sending
+    const decryptedData = decryptShippingInfo(data);
+
     res.json({
       success: true,
       message: "Order status updated",
-      order: data
+      order: decryptedData
     });
   } catch (error) {
     console.error("❌ Update order status error:", error);
@@ -894,10 +1053,13 @@ router.patch("/:orderId/payment", async (req, res) => {
 
     console.log(`✅ Order ${orderId} payment status updated to ${payment_status}`);
 
+    // 🔓 DECRYPT before sending
+    const decryptedData = decryptShippingInfo(data);
+
     res.json({
       success: true,
       message: "Payment status updated",
-      order: data
+      order: decryptedData
     });
   } catch (error) {
     console.error("❌ Update payment status error:", error);
@@ -934,10 +1096,13 @@ router.patch("/:orderId/tracking", async (req, res) => {
 
     console.log(`✅ Order ${orderId} tracking number updated`);
 
+    // 🔓 DECRYPT before sending
+    const decryptedData = decryptShippingInfo(data);
+
     res.json({
       success: true,
       message: "Tracking number updated",
-      order: data
+      order: decryptedData
     });
   } catch (error) {
     console.error("❌ Update tracking number error:", error);
@@ -1027,10 +1192,13 @@ router.delete("/:orderId", async (req, res) => {
 
     console.log(`✅ Order ${orderId} cancelled successfully`);
 
+    // 🔓 DECRYPT before sending
+    const decryptedData = decryptShippingInfo(data);
+
     res.json({
       success: true,
       message: "Order cancelled successfully",
-      order: data,
+      order: decryptedData,
       refund_status: order.payment_status === 'paid' ? 'Refund may be required' : 'No refund needed'
     });
   } catch (error) {

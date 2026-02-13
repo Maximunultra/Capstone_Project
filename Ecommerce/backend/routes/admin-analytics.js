@@ -469,4 +469,126 @@ router.get("/payment-breakdown", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────
+// GET /api/admin/analytics/sellers-by-payment
+// Get sellers with their GCash and PayPal order breakdowns
+// ─────────────────────────────────────────
+router.get("/sellers-by-payment", async (req, res) => {
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonthStart = month === 12 
+      ? `${year + 1}-01-01` 
+      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+    // Get all sellers
+    const { data: sellers } = await supabase
+      .from("users")
+      .select("id, full_name, email")
+      .eq("role", "seller");
+
+    if (!sellers || sellers.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const sellerPaymentStats = [];
+
+    for (const seller of sellers) {
+      // Get seller's products
+      const { data: products } = await supabase
+        .from("product")
+        .select("id")
+        .eq("user_id", seller.id);
+
+      const productIds = (products || []).map(p => p.id);
+      if (productIds.length === 0) continue;
+
+      // Get all order items for seller's products
+      const { data: orderItems } = await supabase
+        .from("order_items")
+        .select("order_id, quantity, unit_price")
+        .in("product_id", productIds);
+
+      if (!orderItems || orderItems.length === 0) continue;
+
+      // Get unique order IDs
+      const orderIds = [...new Set(orderItems.map(item => item.order_id))];
+
+      // Get delivered orders with payment methods
+      const { data: orders } = await supabase
+        .from("orders")
+        .select("id, payment_method, subtotal, tax")
+        .in("id", orderIds)
+        .eq("order_status", "delivered")
+        .gte("order_date", monthStart)
+        .lt("order_date", nextMonthStart);
+
+      if (!orders || orders.length === 0) continue;
+
+      // Calculate stats per payment method
+      const stats = {
+        gcash: { orders: 0, revenue: 0 },
+        paypal: { orders: 0, revenue: 0 },
+        cod: { orders: 0, revenue: 0 },
+        total: { orders: 0, revenue: 0 }
+      };
+
+      // Group order items by order_id for this seller
+      const orderItemsMap = {};
+      orderItems.forEach(item => {
+        if (!orderItemsMap[item.order_id]) {
+          orderItemsMap[item.order_id] = [];
+        }
+        orderItemsMap[item.order_id].push(item);
+      });
+
+      orders.forEach(order => {
+        const items = orderItemsMap[order.id] || [];
+        const sellerRevenue = items.reduce((sum, item) => 
+          sum + (item.quantity * parseFloat(item.unit_price)), 0
+        );
+
+        const method = order.payment_method?.toLowerCase();
+        
+        if (stats[method]) {
+          stats[method].orders += 1;
+          stats[method].revenue += sellerRevenue;
+        }
+
+        stats.total.orders += 1;
+        stats.total.revenue += sellerRevenue;
+      });
+
+      // Only include sellers with orders
+      if (stats.total.orders > 0) {
+        sellerPaymentStats.push({
+          seller_id: seller.id,
+          seller_name: seller.full_name,
+          seller_email: seller.email,
+          gcash_orders: stats.gcash.orders,
+          gcash_revenue: stats.gcash.revenue.toFixed(2),
+          paypal_orders: stats.paypal.orders,
+          paypal_revenue: stats.paypal.revenue.toFixed(2),
+          cod_orders: stats.cod.orders,
+          cod_revenue: stats.cod.revenue.toFixed(2),
+          total_orders: stats.total.orders,
+          total_revenue: stats.total.revenue.toFixed(2)
+        });
+      }
+    }
+
+    // Sort by total revenue descending
+    const result = sellerPaymentStats.sort((a, b) => 
+      parseFloat(b.total_revenue) - parseFloat(a.total_revenue)
+    );
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Error /admin/analytics/sellers-by-payment:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;
