@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Hash, User, X, Send } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Hash, User, X, Send, Star } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
@@ -18,6 +18,16 @@ const OrdersPage = ({ userId }) => {
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState('');
+
+  // Review Modal States
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [existingReviews, setExistingReviews] = useState({});
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
@@ -39,14 +49,134 @@ const OrdersPage = ({ userId }) => {
       const data = await response.json();
       setOrders(data.orders || []);
       
-      // Auto-select first order if none selected
       if (data.orders && data.orders.length > 0 && !selectedOrder) {
         setSelectedOrder(data.orders[0]);
       }
+
+      // Fetch existing reviews for all products in orders
+      await fetchExistingReviews(data.orders || []);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchExistingReviews = async (ordersList) => {
+    try {
+      const reviewsMap = {};
+      
+      for (const order of ordersList) {
+        if (order.order_items) {
+          for (const item of order.order_items) {
+            const productId = item.product_id || item.product?.id;
+            if (productId) {
+              const response = await fetch(`${API_BASE_URL}/feedback/product/${productId}`);
+              if (response.ok) {
+                const reviews = await response.json();
+                const userReview = reviews.find(r => r.user_id === currentUserId);
+                if (userReview) {
+                  reviewsMap[productId] = userReview;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      setExistingReviews(reviewsMap);
+    } catch (err) {
+      console.error('Error fetching existing reviews:', err);
+    }
+  };
+
+  const handleOpenReviewModal = (product, orderItem) => {
+    setSelectedProduct({ ...product, orderItem });
+    const productId = product.id || orderItem.product_id;
+    const existingReview = existingReviews[productId];
+    
+    if (existingReview) {
+      setRating(existingReview.rating);
+      setReviewComment(existingReview.comment);
+    } else {
+      setRating(0);
+      setReviewComment('');
+    }
+    
+    setReviewError('');
+    setShowReviewModal(true);
+  };
+
+  const handleSubmitReview = async () => {
+    setReviewError('');
+    
+    if (rating === 0) {
+      setReviewError('Please select a rating');
+      return;
+    }
+    
+    if (!reviewComment.trim()) {
+      setReviewError('Please write a comment');
+      return;
+    }
+    
+    if (reviewComment.trim().length < 10) {
+      setReviewError('Comment must be at least 10 characters long');
+      return;
+    }
+
+    setSubmittingReview(true);
+    
+    try {
+      const productId = selectedProduct.id || selectedProduct.orderItem.product_id;
+      const existingReview = existingReviews[productId];
+      
+      let response;
+      
+      if (existingReview) {
+        // Update existing review
+        response = await fetch(`${API_BASE_URL}/feedback/${existingReview.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rating,
+            comment: reviewComment.trim(),
+            user_id: currentUserId
+          })
+        });
+      } else {
+        // Create new review
+        response = await fetch(`${API_BASE_URL}/feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product_id: parseInt(productId),
+            user_id: currentUserId,
+            rating,
+            comment: reviewComment.trim()
+          })
+        });
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to submit review');
+      }
+
+      alert(existingReview ? '✅ Review updated successfully!' : '✅ Review submitted successfully!');
+      
+      setShowReviewModal(false);
+      setSelectedProduct(null);
+      setRating(0);
+      setReviewComment('');
+      
+      // Refresh to get updated reviews
+      await fetchOrders();
+      
+    } catch (err) {
+      setReviewError(err.message);
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
@@ -112,11 +242,15 @@ const OrdersPage = ({ userId }) => {
     }
   };
 
-  // Check if message seller button should be shown
   const canMessageSeller = (order) => {
     if (!order) return false;
     const activeStatuses = ['pending', 'processing', 'shipped', 'delivered'];
     return activeStatuses.includes(order.order_status.toLowerCase());
+  };
+
+  const canReviewProduct = (order) => {
+    if (!order) return false;
+    return order.order_status.toLowerCase() === 'delivered';
   };
 
   const getStatusColor = (status) => {
@@ -317,15 +451,14 @@ const OrdersPage = ({ userId }) => {
                       </div>
 
                       <div className="flex items-center justify-between mb-3">
-  <div className="flex items-center gap-2">
-    <span className="text-gray-500 text-base font-medium leading-none">₱</span>
-    <p className="text-sm text-gray-600">Total</p>
-  </div>
-  <p className="font-bold text-gray-900">
-    ₱{parseFloat(order.total_amount).toFixed(2)}
-  </p>
-</div>
-
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500 text-base font-medium leading-none">₱</span>
+                          <p className="text-sm text-gray-600">Total</p>
+                        </div>
+                        <p className="font-bold text-gray-900">
+                          ₱{parseFloat(order.total_amount).toFixed(2)}
+                        </p>
+                      </div>
 
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.order_status)}`}>
                         {getStatusIcon(order.order_status)}
@@ -454,44 +587,66 @@ const OrdersPage = ({ userId }) => {
                         Ordered Items
                       </h3>
                       <div className="space-y-3">
-                        {selectedOrder.order_items?.map((item, index) => (
-                          <div key={index} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition">
-                            <div className="flex gap-4">
-                              <div className="w-20 h-20 bg-white rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
-                                {item.product?.product_image ? (
-                                  <img 
-                                    src={item.product.product_image} 
-                                    alt={item.product_name} 
-                                    className="w-full h-full object-cover" 
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                    <Package className="w-8 h-8" />
-                                  </div>
-                                )}
-                              </div>
+                        {selectedOrder.order_items?.map((item, index) => {
+                          const productId = item.product_id || item.product?.id;
+                          const hasReview = existingReviews[productId];
+                          
+                          return (
+                            <div key={index} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition">
+                              <div className="flex gap-4">
+                                <div className="w-20 h-20 bg-white rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
+                                  {item.product?.product_image ? (
+                                    <img 
+                                      src={item.product.product_image} 
+                                      alt={item.product_name} 
+                                      className="w-full h-full object-cover" 
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                      <Package className="w-8 h-8" />
+                                    </div>
+                                  )}
+                                </div>
 
-                              <div className="flex-1">
-                                <h4 className="font-semibold text-gray-900 mb-1">{item.product_name}</h4>
-                                
-                                {item.product?.brand && (
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <User className="w-3.5 h-3.5 text-gray-400" />
-                                    <p className="text-sm text-gray-600">Seller: <span className="font-medium">{item.product.brand}</span></p>
-                                  </div>
-                                )}
+                                <div className="flex-1">
+                                  <h4 className="font-semibold text-gray-900 mb-1">{item.product_name}</h4>
+                                  
+                                  {item.product?.brand && (
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <User className="w-3.5 h-3.5 text-gray-400" />
+                                      <p className="text-sm text-gray-600">Seller: <span className="font-medium">{item.product.brand}</span></p>
+                                    </div>
+                                  )}
 
-                                <div className="flex items-center justify-between mt-2">
-                                  <p className="text-sm text-gray-600">Quantity: <span className="font-semibold text-gray-900">{item.quantity}</span></p>
-                                  <div className="text-right">
-                                    <p className="text-sm text-gray-600">Unit Price</p>
-                                    <p className="font-bold text-gray-900">₱{parseFloat(item.unit_price).toFixed(2)}</p>
+                                  <div className="flex items-center justify-between mt-2">
+                                    <p className="text-sm text-gray-600">Quantity: <span className="font-semibold text-gray-900">{item.quantity}</span></p>
+                                    <div className="text-right">
+                                      <p className="text-sm text-gray-600">Unit Price</p>
+                                      <p className="font-bold text-gray-900">₱{parseFloat(item.unit_price).toFixed(2)}</p>
+                                    </div>
                                   </div>
+
+                                  {/* Review Button for Delivered Orders */}
+                                  {canReviewProduct(selectedOrder) && (
+                                    <div className="mt-3">
+                                      <button
+                                        onClick={() => handleOpenReviewModal(item.product, item)}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition ${
+                                          hasReview
+                                            ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                                            : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+                                        }`}
+                                      >
+                                        <Star className="w-4 h-4" />
+                                        {hasReview ? 'Edit Review' : 'Write Review'}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -531,7 +686,6 @@ const OrdersPage = ({ userId }) => {
 
                     {/* Action Buttons */}
                     <div className="flex gap-3 pt-4">
-                      {/* Message Seller Button - Opens Modal */}
                       {canMessageSeller(selectedOrder) && (
                         <button 
                           onClick={() => setShowMessageModal(true)}
@@ -568,7 +722,6 @@ const OrdersPage = ({ userId }) => {
       {showMessageModal && selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
-            {/* Modal Header */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <MessageCircle className="w-6 h-6" />
@@ -589,9 +742,7 @@ const OrdersPage = ({ userId }) => {
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6">
-              {/* Product Info */}
               {selectedOrder.order_items && selectedOrder.order_items.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <p className="text-sm text-gray-600 mb-2">Product:</p>
@@ -613,14 +764,12 @@ const OrdersPage = ({ userId }) => {
                 </div>
               )}
 
-              {/* Error Message */}
               {messageError && (
                 <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                   <p className="text-sm text-red-700">{messageError}</p>
                 </div>
               )}
 
-              {/* Message Input */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Your Message
@@ -638,7 +787,6 @@ const OrdersPage = ({ userId }) => {
                 </p>
               </div>
 
-              {/* Info Box */}
               <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-800">
                   <strong>Note:</strong> This message will be sent directly to the seller.
@@ -646,7 +794,6 @@ const OrdersPage = ({ userId }) => {
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
               <button
                 onClick={() => {
@@ -673,6 +820,161 @@ const OrdersPage = ({ userId }) => {
                   <>
                     <Send className="w-5 h-5" />
                     Send Message
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Modal */}
+      {showReviewModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white p-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Star className="w-6 h-6" />
+                <div>
+                  <h2 className="text-xl font-bold">
+                    {existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Edit Review' : 'Write Review'}
+                  </h2>
+                  <p className="text-sm text-amber-100">Share your experience</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setSelectedProduct(null);
+                  setRating(0);
+                  setReviewComment('');
+                  setReviewError('');
+                }}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {/* Product Info */}
+              <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-sm text-gray-600 mb-2">Product:</p>
+                <div className="flex items-center gap-3">
+                  {selectedProduct.product_image && (
+                    <img
+                      src={selectedProduct.product_image}
+                      alt={selectedProduct.product_name || selectedProduct.orderItem.product_name}
+                      className="w-16 h-16 object-cover rounded-lg"
+                    />
+                  )}
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      {selectedProduct.product_name || selectedProduct.orderItem.product_name}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {reviewError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-700">{reviewError}</p>
+                </div>
+              )}
+
+              {/* Star Rating */}
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  Your Rating
+                </label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      onClick={() => setRating(star)}
+                      className="transition-transform hover:scale-125"
+                    >
+                      <svg
+                        className={`w-10 h-10 ${
+                          star <= (hoverRating || rating) ? 'text-yellow-400' : 'text-gray-300'
+                        }`}
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+                {rating > 0 && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    {rating === 1 && '⭐ Poor'}
+                    {rating === 2 && '⭐⭐ Fair'}
+                    {rating === 3 && '⭐⭐⭐ Good'}
+                    {rating === 4 && '⭐⭐⭐⭐ Very Good'}
+                    {rating === 5 && '⭐⭐⭐⭐⭐ Excellent'}
+                  </p>
+                )}
+              </div>
+
+              {/* Review Comment */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Your Review
+                </label>
+                <textarea
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                  placeholder="Share your experience with this product... (minimum 10 characters)"
+                  className="w-full h-32 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition resize-none"
+                  disabled={submittingReview}
+                  maxLength={500}
+                />
+                <p className="text-sm text-gray-500 mt-2">
+                  {reviewComment.length} / 500 characters
+                </p>
+              </div>
+
+              {/* Info Box */}
+              <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  <strong>Note:</strong> Your review will be visible to all users and will help others make informed decisions.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setSelectedProduct(null);
+                  setRating(0);
+                  setReviewComment('');
+                  setReviewError('');
+                }}
+                disabled={submittingReview}
+                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitReview}
+                disabled={rating === 0 || !reviewComment.trim() || submittingReview}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-lg hover:from-amber-600 hover:to-orange-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {submittingReview ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Star className="w-5 h-5" />
+                    {existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Update Review' : 'Submit Review'}
                   </>
                 )}
               </button>
