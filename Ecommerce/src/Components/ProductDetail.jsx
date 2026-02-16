@@ -10,13 +10,7 @@ const ProductDetailPage = () => {
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
-  const [rating, setRating] = useState(0);
-  const [hoverRating, setHoverRating] = useState(0);
-  const [comment, setComment] = useState('');
   const [reviews, setReviews] = useState([]);
-  const [userReview, setUserReview] = useState(null);
-  const [editingReview, setEditingReview] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
   // Get user info from localStorage
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -44,151 +38,18 @@ const ProductDetailPage = () => {
 
   const fetchReviews = async () => {
     try {
-      // Fetch all reviews for the product
       const response = await fetch(`${API_BASE_URL}/feedback/product/${id}`);
       if (!response.ok) throw new Error('Failed to fetch reviews');
       const data = await response.json();
       setReviews(data);
-
-      // Check if current user has already reviewed this product
-      if (userId) {
-        const userReviewData = data.find(review => review.user_id === userId);
-        if (userReviewData) {
-          setUserReview(userReviewData);
-          setRating(userReviewData.rating);
-          setComment(userReviewData.comment);
-        }
-      }
     } catch (error) {
       console.error('Error fetching reviews:', error);
       setReviews([]);
     }
   };
 
-  const handleSubmitReview = async () => {
-    if (!userId) {
-      alert('Please log in to submit a review');
-      return;
-    }
-
-    if (rating === 0) {
-      alert('Please select a rating');
-      return;
-    }
-    if (!comment.trim()) {
-      alert('Please write a comment');
-      return;
-    }
-    if (comment.trim().length < 10) {
-      alert('Comment must be at least 10 characters long');
-      return;
-    }
-
-    setSubmitting(true);
-
-    try {
-      if (userReview && editingReview) {
-        // Update existing review
-        const response = await fetch(`${API_BASE_URL}/feedback/${userReview.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            rating,
-            comment: comment.trim(),
-            user_id: userId
-          })
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to update review');
-        }
-
-        alert('Review updated successfully!');
-        setEditingReview(false);
-      } else {
-        // Create new review
-        const response = await fetch(`${API_BASE_URL}/feedback`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            product_id: parseInt(id),
-            user_id: userId,
-            rating,
-            comment: comment.trim()
-          })
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to submit review');
-        }
-
-        alert('Review submitted successfully!');
-      }
-
-      // Refresh reviews and product data (to update rating stats)
-      await fetchReviews();
-      await fetchProduct();
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteReview = async (reviewId) => {
-    if (!window.confirm('Are you sure you want to delete this review?')) return;
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/feedback/${reviewId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId
-        })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to delete review');
-      }
-
-      alert('Review deleted successfully!');
-      setUserReview(null);
-      setRating(0);
-      setComment('');
-      setEditingReview(false);
-      
-      // Refresh reviews and product data
-      await fetchReviews();
-      await fetchProduct();
-    } catch (error) {
-      alert('Error: ' + error.message);
-    }
-  };
-
-  const handleEditReview = () => {
-    setEditingReview(true);
-    setRating(userReview.rating);
-    setComment(userReview.comment);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingReview(false);
-    setRating(userReview.rating);
-    setComment(userReview.comment);
-  };
-
   const handleEdit = () => {
     console.log('Edit product:', id);
-    // Navigate to edit page based on user role
     if (userRole === 'admin') {
       navigate(`/admin/products/${id}/edit`);
     } else if (userRole === 'seller') {
@@ -214,7 +75,6 @@ const ProductDetailPage = () => {
 
       alert('Product deleted successfully!');
       
-      // Navigate back to products list based on user role
       if (userRole === 'admin') {
         navigate('/admin/products');
       } else if (userRole === 'seller') {
@@ -228,7 +88,6 @@ const ProductDetailPage = () => {
   };
 
   const handleBackClick = () => {
-    // Navigate back to products list based on user role
     if (userRole === 'admin') {
       navigate('/admin/products');
     } else if (userRole === 'seller') {
@@ -477,159 +336,55 @@ const ProductDetailPage = () => {
             </div>
           </div>
 
-          {/* Reviews Section */}
+          {/* Reviews Section - READ ONLY */}
           <div className="border-t border-gray-200 p-8">
             <h2 className="text-2xl font-bold mb-6">Customer Reviews</h2>
-
-            {/* Write/Edit Review */}
-            {userId && (
-              <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-6 mb-8 border border-gray-200">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold">
-                    {userReview && !editingReview ? 'Your Review' : editingReview ? 'Edit Your Review' : 'Write a Review'}
-                  </h3>
-                  {userReview && !editingReview && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleEditReview}
-                        className="text-blue-600 hover:text-blue-700 font-medium text-sm"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteReview(userReview.id)}
-                        className="text-red-600 hover:text-red-700 font-medium text-sm"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-                
-                {(!userReview || editingReview) && (
-                  <>
-                    {/* Star Rating Input */}
-                    <div className="mb-4">
-                      <label className="block text-sm font-semibold mb-2">Your Rating</label>
-                      <div className="flex gap-1">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <button
-                            key={star}
-                            onMouseEnter={() => setHoverRating(star)}
-                            onMouseLeave={() => setHoverRating(0)}
-                            onClick={() => setRating(star)}
-                            className="transition-transform hover:scale-125"
-                          >
-                            <svg
-                              className={`w-8 h-8 ${
-                                star <= (hoverRating || rating) ? 'text-yellow-400' : 'text-gray-300'
-                              }`}
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Comment Input */}
-                    <div className="mb-4">
-                      <label className="block text-sm font-semibold mb-2">Your Review</label>
-                      <textarea
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        rows="4"
-                        className="w-full border-2 border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="Share your experience with this product... (minimum 10 characters)"
-                      />
-                      <p className="text-sm text-gray-500 mt-1">{comment.length} characters</p>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSubmitReview}
-                        disabled={submitting}
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 py-3 rounded-lg font-semibold transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {submitting ? 'Submitting...' : (editingReview ? 'Update Review' : 'Submit Review')}
-                      </button>
-                      {editingReview && (
-                        <button
-                          onClick={handleCancelEdit}
-                          className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold transition"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {/* Display user's existing review (when not editing) */}
-                {userReview && !editingReview && (
-                  <div className="bg-white rounded-lg p-4 border border-gray-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="flex">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <svg
-                            key={star}
-                            className={`w-5 h-5 ${star <= userReview.rating ? 'text-yellow-400' : 'text-gray-300'}`}
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                          </svg>
-                        ))}
-                      </div>
-                      <span className="text-sm text-gray-500">{formatDate(userReview.created_at)}</span>
-                    </div>
-                    <p className="text-gray-700 leading-relaxed">{userReview.comment}</p>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Reviews List */}
             <div className="space-y-4">
               {reviews.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No reviews yet. Be the first to review!</p>
+                <div className="text-center py-12">
+                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                    </svg>
+                  </div>
+                  <p className="text-gray-500 text-lg font-medium">No reviews yet</p>
+                  <p className="text-gray-400 text-sm mt-2">Be the first to review this product after purchasing!</p>
+                </div>
               ) : (
-                reviews
-                  .filter(review => review.user_id !== userId) // Don't show user's own review in the list
-                  .map((review) => (
-                    <div key={review.id} className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition">
-                      <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
-                          {review.users?.profile_image ? (
-                            <img src={review.users.profile_image} alt={review.users.full_name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="font-bold text-white">{review.users?.full_name?.charAt(0) || '?'}</span>
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="font-bold text-gray-900">{review.users?.full_name || 'Anonymous'}</span>
-                            <div className="flex">
-                              {[1, 2, 3, 4, 5].map((star) => (
-                                <svg
-                                  key={star}
-                                  className={`w-4 h-4 ${star <= review.rating ? 'text-yellow-400' : 'text-gray-300'}`}
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                              ))}
-                            </div>
-                            <span className="text-sm text-gray-500">{formatDate(review.created_at)}</span>
+                reviews.map((review) => (
+                  <div key={review.id} className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition">
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                        {review.users?.profile_image ? (
+                          <img src={review.users.profile_image} alt={review.users.full_name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="font-bold text-white">{review.users?.full_name?.charAt(0) || '?'}</span>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="font-bold text-gray-900">{review.users?.full_name || 'Anonymous'}</span>
+                          <div className="flex">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <svg
+                                key={star}
+                                className={`w-4 h-4 ${star <= review.rating ? 'text-yellow-400' : 'text-gray-300'}`}
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                              >
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                            ))}
                           </div>
-                          <p className="text-gray-700 leading-relaxed">{review.comment}</p>
+                          <span className="text-sm text-gray-500">{formatDate(review.created_at)}</span>
                         </div>
+                        <p className="text-gray-700 leading-relaxed">{review.comment}</p>
                       </div>
                     </div>
-                  ))
+                  </div>
+                ))
               )}
             </div>
           </div>
