@@ -591,4 +591,69 @@ router.get("/sellers-by-payment", async (req, res) => {
   }
 });
 
+
+// ─────────────────────────────────────────
+// Add this route to your admin-analytics.js
+// GET /api/admin/analytics/paypal-transactions
+// Get all PayPal transactions with order details
+// ─────────────────────────────────────────
+
+router.get("/payment-transactions", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonthStart = month === 12 
+      ? `${year + 1}-01-01` 
+      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+    // Get all GCash and PayPal orders (delivered only)
+    const { data: orders } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        total_amount,
+        payment_method,
+        payment_intent_id,
+        payment_capture_id,
+        payment_status,
+        order_date,
+        shipping_full_name,
+        shipping_email
+      `)
+      .in("payment_method", ["gcash", "paypal"])
+      .eq("order_status", "delivered")
+      .gte("order_date", monthStart)
+      .lt("order_date", nextMonthStart)
+      .order("order_date", { ascending: false })
+      .limit(limit);
+
+    if (!orders || orders.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Format the transactions
+    const transactions = orders.map(order => ({
+      order_id: order.id,
+      order_number: order.order_number,
+      customer_name: order.shipping_full_name,
+      customer_email: order.shipping_email,
+      total_amount: parseFloat(order.total_amount).toFixed(2),
+      payment_method: order.payment_method,
+      payment_intent_id: order.payment_intent_id, // For GCash: pi_xxx, For PayPal: PayPal Order ID
+      payment_capture_id: order.payment_capture_id, // For PayPal: Capture ID, For GCash: may be null
+      payment_status: order.payment_status,
+      order_date: order.order_date
+    }));
+
+    res.json({ success: true, data: transactions });
+  } catch (error) {
+    console.error("Error /admin/analytics/payment-transactions:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;

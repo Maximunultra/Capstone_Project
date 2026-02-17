@@ -9,9 +9,7 @@ const router = express.Router();
 const storage = multer.memoryStorage();
 const upload = multer({ 
   storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -21,7 +19,7 @@ const upload = multer({
   }
 });
 
-// Helper function to hash passwords (same as server.js)
+// Helper function to hash passwords
 async function hashPassword(password) {
   try {
     const saltRounds = 10;
@@ -32,6 +30,19 @@ async function hashPassword(password) {
     console.error('❌ Error hashing password:', error);
     throw new Error('Failed to hash password');
   }
+}
+
+// ✅ Helper: validate Philippine phone number (11 digits, starts with 09)
+function validatePhoneNumber(phone) {
+  if (!phone) return null;
+  const digitsOnly = phone.replace(/\D/g, '');
+  if (digitsOnly.length !== 11) {
+    return 'Phone number must be exactly 11 digits';
+  }
+  if (!digitsOnly.startsWith('09')) {
+    return 'Phone number must start with 09';
+  }
+  return null; // null = valid
 }
 
 // Helper function to upload image to Supabase Storage
@@ -48,9 +59,7 @@ const uploadImageToSupabase = async (file, userId) => {
         cacheControl: '3600'
       });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const { data: { publicUrl } } = supabase.storage
       .from('user-profile-images')
@@ -69,7 +78,6 @@ router.post("/upload", upload.single('image'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: "No image file provided" });
     }
-
     const imageUrl = await uploadImageToSupabase(req.file);
     res.json({ imageUrl });
   } catch (error) {
@@ -82,15 +90,11 @@ router.post("/upload", upload.single('image'), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { data, error } = await supabase.from("users").select("*");
-    
     if (error) throw error;
-    
-    // Remove password_hash from all users before sending
     const usersWithoutPasswords = data.map(user => {
       const { password_hash, ...userWithoutPassword } = user;
       return userWithoutPassword;
     });
-    
     res.json(usersWithoutPasswords);
   } catch (error) {
     console.error("❌ Error:", error);
@@ -102,19 +106,49 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     console.log('📝 User registration request received');
-    const { full_name, email, password, role, phone, address, profile_image, proof_document, valid_id_front, valid_id_back } = req.body;
-    
+    const {
+      full_name, email, password, role, phone,
+      address, birthdate, profile_image,
+      proof_document, valid_id_front, valid_id_back
+    } = req.body;
+
+    // Required fields
     if (!full_name || !email || !password || !role) {
       return res.status(400).json({ 
         error: "full_name, email, password, and role are required." 
       });
     }
 
-    // Validate role (only buyer or seller allowed)
+    // Validate role
     if (!['buyer', 'seller'].includes(role)) {
       return res.status(400).json({ 
         error: "Role must be either 'buyer' or 'seller'" 
       });
+    }
+
+    // ✅ Validate phone number if provided
+    if (phone) {
+      const phoneError = validatePhoneNumber(phone);
+      if (phoneError) {
+        return res.status(400).json({ error: phoneError });
+      }
+    }
+
+    // ✅ Validate birthdate if provided
+    if (birthdate) {
+      const birthDate = new Date(birthdate);
+      const today = new Date();
+      const age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      const actualAge = monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())
+        ? age - 1
+        : age;
+
+      if (actualAge < 18) {
+        return res.status(400).json({ 
+          error: "You must be at least 18 years old to register" 
+        });
+      }
     }
 
     // Require documents for sellers
@@ -160,12 +194,11 @@ router.post("/", async (req, res) => {
       return res.status(409).json({ error: "User with this email already exists" });
     }
 
-    // Hash the password before storing
+    // Hash the password
     console.log('🔐 Hashing password...');
     const hashedPassword = await hashPassword(password);
-    console.log('✅ Password hashed, length:', hashedPassword.length);
 
-    // Create user data object
+    // ✅ Create user data including birthdate
     const userData = {
       full_name,
       email,
@@ -173,11 +206,12 @@ router.post("/", async (req, res) => {
       role,
       phone: phone || null,
       address: address || null,
+      birthdate: birthdate || null,        // ✅ Include birthdate
       profile_image: profile_image || null,
-      proof_document: proof_document || null, // Add proof document field
-      valid_id_front: valid_id_front || null, // Add valid ID front
-      valid_id_back: valid_id_back || null, // Add valid ID back
-      approval_status: role === 'seller' ? 'pending' : 'approved', // Sellers need approval, buyers auto-approved
+      proof_document: proof_document || null,
+      valid_id_front: valid_id_front || null,
+      valid_id_back: valid_id_back || null,
+      approval_status: role === 'seller' ? 'pending' : 'approved',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -195,8 +229,6 @@ router.post("/", async (req, res) => {
     }
 
     console.log('✅ User created successfully:', data.email);
-
-    // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.status(201).json(userResponse);
   } catch (error) {
@@ -219,7 +251,6 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
   } catch (error) {
@@ -232,21 +263,47 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, email, password, role, phone, address, profile_image, proof_document, valid_id_front, valid_id_back } = req.body;
-    
+    const {
+      full_name, email, password, role, phone,
+      address, birthdate, profile_image,
+      proof_document, valid_id_front, valid_id_back
+    } = req.body;
+
+    // ✅ Validate phone if being updated
+    if (phone) {
+      const phoneError = validatePhoneNumber(phone);
+      if (phoneError) {
+        return res.status(400).json({ error: phoneError });
+      }
+    }
+
+    // ✅ Validate birthdate if being updated
+    if (birthdate) {
+      const birthDate = new Date(birthdate);
+      const today = new Date();
+      const age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      const actualAge = monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())
+        ? age - 1
+        : age;
+
+      if (actualAge < 18) {
+        return res.status(400).json({ 
+          error: "You must be at least 18 years old" 
+        });
+      }
+    }
+
     const updateFields = {};
     if (full_name) updateFields.full_name = full_name;
     if (email) updateFields.email = email;
-    
-    // Hash password if it's being updated
+
     if (password) {
       console.log('🔐 Hashing new password for update...');
       updateFields.password_hash = await hashPassword(password);
-      console.log('✅ Password hashed for update');
     }
-    
+
     if (role) {
-      // Validate role
       if (!['buyer', 'seller'].includes(role)) {
         return res.status(400).json({ 
           error: "Role must be either 'buyer' or 'seller'" 
@@ -254,15 +311,15 @@ router.put("/:id", async (req, res) => {
       }
       updateFields.role = role;
     }
-    
+
     if (phone !== undefined) updateFields.phone = phone;
     if (address !== undefined) updateFields.address = address;
+    if (birthdate !== undefined) updateFields.birthdate = birthdate;   // ✅ Handle birthdate update
     if (profile_image !== undefined) updateFields.profile_image = profile_image;
     if (proof_document !== undefined) updateFields.proof_document = proof_document;
     if (valid_id_front !== undefined) updateFields.valid_id_front = valid_id_front;
     if (valid_id_back !== undefined) updateFields.valid_id_back = valid_id_back;
 
-    // Add updated timestamp
     updateFields.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -273,10 +330,8 @@ router.put("/:id", async (req, res) => {
       .single();
 
     if (error) throw error;
-    
+
     console.log('✅ User updated successfully');
-    
-    // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
   } catch (error) {
@@ -289,55 +344,28 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // First, get the user to check if they have images to delete
+
     const { data: user } = await supabase
       .from("users")
       .select("profile_image, proof_document, valid_id_front, valid_id_back")
       .eq("id", id)
       .single();
 
-    // Delete the user
-    const { error } = await supabase
-      .from("users")
-      .delete()
-      .eq("id", id);
-
+    const { error } = await supabase.from("users").delete().eq("id", id);
     if (error) throw error;
 
-    // Delete all user images from storage
     if (user) {
       const imagesToDelete = [];
-      
-      if (user.profile_image) {
-        const imagePath = user.profile_image.split('/').pop();
-        imagesToDelete.push(`profiles/${imagePath}`);
-      }
-      
-      if (user.proof_document) {
-        const documentPath = user.proof_document.split('/').pop();
-        imagesToDelete.push(`profiles/${documentPath}`);
-      }
-      
-      if (user.valid_id_front) {
-        const idFrontPath = user.valid_id_front.split('/').pop();
-        imagesToDelete.push(`profiles/${idFrontPath}`);
-      }
-      
-      if (user.valid_id_back) {
-        const idBackPath = user.valid_id_back.split('/').pop();
-        imagesToDelete.push(`profiles/${idBackPath}`);
-      }
-      
-      // Delete all images in one call
+      if (user.profile_image) imagesToDelete.push(`profiles/${user.profile_image.split('/').pop()}`);
+      if (user.proof_document) imagesToDelete.push(`profiles/${user.proof_document.split('/').pop()}`);
+      if (user.valid_id_front) imagesToDelete.push(`profiles/${user.valid_id_front.split('/').pop()}`);
+      if (user.valid_id_back) imagesToDelete.push(`profiles/${user.valid_id_back.split('/').pop()}`);
+
       if (imagesToDelete.length > 0) {
         try {
-          await supabase.storage
-            .from('user-profile-images')
-            .remove(imagesToDelete);
+          await supabase.storage.from('user-profile-images').remove(imagesToDelete);
         } catch (storageError) {
           console.error('Error deleting user images:', storageError);
-          // Don't fail the entire operation if image deletion fails
         }
       }
     }
@@ -356,14 +384,12 @@ router.patch("/:id/approval", async (req, res) => {
     const { id } = req.params;
     const { approval_status } = req.body;
 
-    // Validate approval status
     if (!['approved', 'rejected', 'pending'].includes(approval_status)) {
       return res.status(400).json({ 
         error: "approval_status must be 'approved', 'rejected', or 'pending'" 
       });
     }
 
-    // Get the user first to check if they're a seller
     const { data: user, error: fetchError } = await supabase
       .from("users")
       .select("role, approval_status")
@@ -374,13 +400,9 @@ router.patch("/:id/approval", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Update approval status
     const { data, error } = await supabase
       .from("users")
-      .update({ 
-        approval_status,
-        updated_at: new Date().toISOString()
-      })
+      .update({ approval_status, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .single();
@@ -388,8 +410,6 @@ router.patch("/:id/approval", async (req, res) => {
     if (error) throw error;
 
     console.log(`✅ User ${approval_status} successfully`);
-
-    // Don't return the password hash in the response
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
   } catch (error) {
