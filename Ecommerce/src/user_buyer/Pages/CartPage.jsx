@@ -470,9 +470,9 @@ const CartPage = ({ userId }) => {
                             <CheckCircle className="w-5 h-5 text-emerald-600" />
                           </div>
                           <div>
-                            <h3 className="font-bold text-gray-900 mb-1">Free Shipping</h3>
+                            <h3 className="font-bold text-gray-900 mb-1">Shipping</h3>
                             <p className="text-sm text-gray-600">
-                              On all orders over ₱1,000
+                              Your Shipping will be calculated at checkout
                             </p>
                           </div>
                         </div>

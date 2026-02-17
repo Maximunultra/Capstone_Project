@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Mail, Phone, MapPin, Edit2, Save, X, FileText, Calendar, Shield } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Edit2, Save, X, FileText, Calendar, Shield, AlertCircle } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
@@ -10,34 +10,35 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
-  // Get userId from localStorage
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = user.id;
 
   const [profileData, setProfileData] = useState({
-    full_name: '',
-    email: '',
-    phone: '',
-    address: '',
-    role: '',
-    profile_image: '',
-    proof_document: '',
-    valid_id_front: '',
-    valid_id_back: '',
-    approval_status: '',
-    created_at: '',
-    updated_at: ''
+    full_name: '', email: '', phone: '', address: '', birthdate: '',
+    role: '', profile_image: '', proof_document: '', valid_id_front: '',
+    valid_id_back: '', approval_status: '', created_at: '', updated_at: ''
   });
 
   const [editedData, setEditedData] = useState({
-    full_name: '',
-    email: '',
-    phone: '',
-    address: ''
+    full_name: '', email: '', phone: '', address: '', birthdate: ''
   });
+
+  // ✅ Max birthdate = 18 years ago
+  const getMaxBirthdate = () => {
+    const today = new Date();
+    today.setFullYear(today.getFullYear() - 18);
+    return today.toISOString().split('T')[0];
+  };
+
+  const getMinBirthdate = () => {
+    const today = new Date();
+    today.setFullYear(today.getFullYear() - 120);
+    return today.toISOString().split('T')[0];
+  };
 
   useEffect(() => {
     if (userId) {
@@ -52,26 +53,19 @@ const Profile = () => {
     try {
       setLoading(true);
       setError(null);
-      
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch user profile');
-      }
-
+      if (!response.ok) throw new Error('Failed to fetch user profile');
       const userData = await response.json();
-      
-      // Set all user data to state
+
       setProfileData({
         full_name: userData.full_name || '',
         email: userData.email || '',
         phone: userData.phone || '',
         address: userData.address || '',
+        birthdate: userData.birthdate ? userData.birthdate.split('T')[0] : '',
         role: userData.role || '',
         profile_image: userData.profile_image || '',
         proof_document: userData.proof_document || '',
@@ -82,21 +76,17 @@ const Profile = () => {
         updated_at: userData.updated_at || ''
       });
 
-      // Set editable data
       setEditedData({
         full_name: userData.full_name || '',
         email: userData.email || '',
         phone: userData.phone || '',
-        address: userData.address || ''
+        address: userData.address || '',
+        birthdate: userData.birthdate ? userData.birthdate.split('T')[0] : ''
       });
 
-      // Update localStorage with fresh data
       localStorage.setItem('user', JSON.stringify(userData));
-      
-      console.log('✅ User profile loaded:', userData);
     } catch (err) {
       setError('Failed to load profile');
-      console.error('Error loading profile:', err);
     } finally {
       setLoading(false);
     }
@@ -104,40 +94,95 @@ const Profile = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setEditedData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+
+    // ✅ Phone: digits only, max 11
+    if (name === 'phone') {
+      const digitsOnly = value.replace(/\D/g, '');
+      if (digitsOnly.length <= 11) {
+        setEditedData(prev => ({ ...prev, phone: digitsOnly }));
+      }
+      if (fieldErrors.phone) setFieldErrors(prev => ({ ...prev, phone: '' }));
+      return;
+    }
+
+    setEditedData(prev => ({ ...prev, [name]: value }));
+    if (fieldErrors[name]) setFieldErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   const handleEdit = () => {
     setIsEditing(true);
     setError(null);
     setSuccessMessage('');
+    setFieldErrors({});
   };
 
   const handleCancel = () => {
-    // Reset edited data to original profile data
     setEditedData({
       full_name: profileData.full_name,
       email: profileData.email,
       phone: profileData.phone,
-      address: profileData.address
+      address: profileData.address,
+      birthdate: profileData.birthdate
     });
     setIsEditing(false);
     setError(null);
     setSuccessMessage('');
+    setFieldErrors({});
+  };
+
+  // ✅ Validate before saving
+  const validateFields = () => {
+    const newErrors = {};
+
+    if (!editedData.full_name.trim()) {
+      newErrors.full_name = 'Full name is required';
+    }
+    if (!editedData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(editedData.email)) {
+      newErrors.email = 'Please enter a valid email';
+    }
+
+    // ✅ Phone: 11 digits, starts with 09
+    if (editedData.phone) {
+      if (editedData.phone.length !== 11) {
+        newErrors.phone = 'Phone number must be exactly 11 digits';
+      } else if (!editedData.phone.startsWith('09')) {
+        newErrors.phone = 'Phone number must start with 09 (e.g. 09XXXXXXXXX)';
+      }
+    }
+
+    // ✅ Birthdate: at least 18
+    if (editedData.birthdate) {
+      const birthDate = new Date(editedData.birthdate);
+      const today = new Date();
+      const age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      const actualAge = monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())
+        ? age - 1 : age;
+      if (actualAge < 18) {
+        newErrors.birthdate = 'You must be at least 18 years old';
+      }
+    }
+
+    return newErrors;
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+
+    const validationErrors = validateFields();
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      return;
+    }
+
     setSaving(true);
     setError(null);
     setSuccessMessage('');
 
     try {
       const token = localStorage.getItem('token');
-      
       const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
         method: 'PUT',
         headers: {
@@ -153,25 +198,14 @@ const Profile = () => {
       }
 
       const updatedUser = await response.json();
-      
-      // Update profile data with response
-      setProfileData(prev => ({
-        ...prev,
-        ...updatedUser
-      }));
-      
-      // Update localStorage
+      setProfileData(prev => ({ ...prev, ...updatedUser, birthdate: updatedUser.birthdate ? updatedUser.birthdate.split('T')[0] : '' }));
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
       setSuccessMessage('Profile updated successfully!');
       setIsEditing(false);
-      
+      setFieldErrors({});
       setTimeout(() => setSuccessMessage(''), 3000);
-      
-      console.log('✅ Profile updated successfully');
     } catch (err) {
       setError(err.message || 'Failed to update profile');
-      console.error('❌ Profile update error:', err);
     } finally {
       setSaving(false);
     }
@@ -180,10 +214,15 @@ const Profile = () => {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+      year: 'numeric', month: 'long', day: 'numeric'
     });
+  };
+
+  // ✅ Phone validation status
+  const getPhoneStatus = () => {
+    if (!editedData.phone) return null;
+    if (editedData.phone.length === 11 && editedData.phone.startsWith('09')) return 'valid';
+    return 'invalid';
   };
 
   const getStatusBadge = (status) => {
@@ -192,9 +231,7 @@ const Profile = () => {
       approved: { color: 'bg-green-100 text-green-700 border-green-200', text: 'Approved' },
       rejected: { color: 'bg-red-100 text-red-700 border-red-200', text: 'Rejected' }
     };
-    
     const badge = badges[status] || badges.pending;
-    
     return (
       <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${badge.color}`}>
         {badge.text}
@@ -222,10 +259,7 @@ const Profile = () => {
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Not Logged In</h2>
           <p className="text-gray-600 mb-6">Please log in to view your profile.</p>
-          <button
-            onClick={() => navigate('/login')}
-            className="px-6 py-3 bg-[#5c5042] text-white rounded-lg hover:bg-[#4a3f35] transition"
-          >
+          <button onClick={() => navigate('/login')} className="px-6 py-3 bg-[#5c5042] text-white rounded-lg hover:bg-[#4a3f35] transition">
             Go to Login
           </button>
         </div>
@@ -236,7 +270,7 @@ const Profile = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 p-6">
       <div className="max-w-5xl mx-auto">
-        
+
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">My Profile</h1>
@@ -266,19 +300,14 @@ const Profile = () => {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Left Sidebar - Profile Image & Status */}
+
+          {/* Left Sidebar */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-orange-100">
-              {/* Profile Image */}
               <div className="text-center mb-6">
                 <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center mx-auto mb-4 ring-4 ring-orange-100 shadow-lg">
                   {profileData.profile_image ? (
-                    <img 
-                      src={profileData.profile_image} 
-                      alt={profileData.full_name}
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={profileData.profile_image} alt={profileData.full_name} className="w-full h-full object-cover" />
                   ) : (
                     <User className="w-16 h-16 text-orange-600" />
                   )}
@@ -291,21 +320,29 @@ const Profile = () => {
                 </span>
               </div>
 
-              {/* Account Status */}
+              {/* Account Status for sellers */}
               {profileData.role === 'seller' && (
                 <div className="border-t border-gray-200 pt-4 mb-4">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Account Status</label>
                   {getStatusBadge(profileData.approval_status)}
                   {profileData.approval_status === 'pending' && (
-                    <p className="text-xs text-gray-600 mt-2">
-                      Your seller account is pending admin approval.
-                    </p>
+                    <p className="text-xs text-gray-600 mt-2">Your seller account is pending admin approval.</p>
                   )}
                 </div>
               )}
 
               {/* Account Dates */}
               <div className="border-t border-gray-200 pt-4 space-y-3">
+                {/* ✅ Show birthdate in sidebar */}
+                {profileData.birthdate && (
+                  <div>
+                    <label className="flex items-center text-sm font-semibold text-gray-700 mb-1">
+                      <Calendar className="w-4 h-4 mr-2 text-orange-500" />
+                      Birthdate
+                    </label>
+                    <p className="text-sm text-gray-600">{formatDate(profileData.birthdate)}</p>
+                  </div>
+                )}
                 <div>
                   <label className="flex items-center text-sm font-semibold text-gray-700 mb-1">
                     <Calendar className="w-4 h-4 mr-2 text-orange-500" />
@@ -342,7 +379,7 @@ const Profile = () => {
 
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  
+
                   {/* Full Name */}
                   <div>
                     <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
@@ -350,18 +387,19 @@ const Profile = () => {
                       Full Name {isEditing && <span className="text-red-500 ml-1">*</span>}
                     </label>
                     {isEditing ? (
-                      <input
-                        type="text"
-                        name="full_name"
-                        value={editedData.full_name}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                        required
-                      />
+                      <>
+                        <input
+                          type="text"
+                          name="full_name"
+                          value={editedData.full_name}
+                          onChange={handleInputChange}
+                          className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all ${fieldErrors.full_name ? 'border-red-400' : 'border-gray-300'}`}
+                          required
+                        />
+                        {fieldErrors.full_name && <p className="text-red-500 text-xs mt-1">{fieldErrors.full_name}</p>}
+                      </>
                     ) : (
-                      <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
-                        {profileData.full_name}
-                      </div>
+                      <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">{profileData.full_name}</div>
                     )}
                   </div>
 
@@ -372,36 +410,69 @@ const Profile = () => {
                       Email {isEditing && <span className="text-red-500 ml-1">*</span>}
                     </label>
                     {isEditing ? (
-                      <input
-                        type="email"
-                        name="email"
-                        value={editedData.email}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                        required
-                      />
+                      <>
+                        <input
+                          type="email"
+                          name="email"
+                          value={editedData.email}
+                          onChange={handleInputChange}
+                          className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all ${fieldErrors.email ? 'border-red-400' : 'border-gray-300'}`}
+                          required
+                        />
+                        {fieldErrors.email && <p className="text-red-500 text-xs mt-1">{fieldErrors.email}</p>}
+                      </>
                     ) : (
-                      <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
-                        {profileData.email}
-                      </div>
+                      <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">{profileData.email}</div>
                     )}
                   </div>
 
-                  {/* Phone Number */}
+                  {/* ✅ Phone with live validation */}
                   <div>
                     <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
                       <Phone className="w-4 h-4 mr-2 text-orange-500" />
                       Phone Number
                     </label>
                     {isEditing ? (
-                      <input
-                        type="tel"
-                        name="phone"
-                        value={editedData.phone}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                        placeholder="Optional"
-                      />
+                      <>
+                        <div className="relative">
+                          <input
+                            type="tel"
+                            name="phone"
+                            value={editedData.phone}
+                            onChange={handleInputChange}
+                            inputMode="numeric"
+                            maxLength={11}
+                            placeholder="09XXXXXXXXX"
+                            className={`w-full px-4 py-2.5 pr-12 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all ${
+                              fieldErrors.phone
+                                ? 'border-red-400 bg-red-50'
+                                : getPhoneStatus() === 'valid'
+                                ? 'border-green-400 bg-green-50'
+                                : 'border-gray-300'
+                            }`}
+                          />
+                          <span className={`absolute right-3 top-3 text-xs font-semibold ${editedData.phone.length === 11 ? 'text-green-600' : 'text-gray-400'}`}>
+                            {editedData.phone.length}/11
+                          </span>
+                        </div>
+                        {editedData.phone.length > 0 && (
+                          <div className="mt-1.5 space-y-0.5">
+                            <div className={`flex items-center gap-1 text-xs ${editedData.phone.startsWith('09') ? 'text-green-600' : 'text-red-500'}`}>
+                              <span>{editedData.phone.startsWith('09') ? '✓' : '✗'}</span>
+                              <span>Starts with 09</span>
+                            </div>
+                            <div className={`flex items-center gap-1 text-xs ${editedData.phone.length === 11 ? 'text-green-600' : 'text-red-500'}`}>
+                              <span>{editedData.phone.length === 11 ? '✓' : '✗'}</span>
+                              <span>Exactly 11 digits ({editedData.phone.length} entered)</span>
+                            </div>
+                          </div>
+                        )}
+                        {fieldErrors.phone && (
+                          <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />{fieldErrors.phone}
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
                         {profileData.phone || 'Not provided'}
@@ -409,8 +480,41 @@ const Profile = () => {
                     )}
                   </div>
 
-                  {/* Address */}
+                  {/* ✅ Birthdate */}
                   <div>
+                    <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
+                      <Calendar className="w-4 h-4 mr-2 text-orange-500" />
+                      Birthdate
+                    </label>
+                    {isEditing ? (
+                      <>
+                        <input
+                          type="date"
+                          name="birthdate"
+                          value={editedData.birthdate}
+                          onChange={handleInputChange}
+                          min={getMinBirthdate()}
+                          max={getMaxBirthdate()}
+                          className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all ${fieldErrors.birthdate ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                        />
+                        {fieldErrors.birthdate && (
+                          <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />{fieldErrors.birthdate}
+                          </p>
+                        )}
+                        {!fieldErrors.birthdate && (
+                          <p className="text-gray-400 text-xs mt-1">Must be at least 18 years old</p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                        {profileData.birthdate ? formatDate(profileData.birthdate) : 'Not provided'}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Address - full width */}
+                  <div className="md:col-span-2">
                     <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
                       <MapPin className="w-4 h-4 mr-2 text-orange-500" />
                       Address
@@ -439,78 +543,36 @@ const Profile = () => {
                       <FileText className="w-5 h-5 mr-2 text-orange-500" />
                       Verification Documents
                     </h3>
-                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Proof Document */}
                       {profileData.proof_document && (
                         <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                          <label className="block text-sm font-semibold text-gray-700 mb-3">
-                            Barangay Certificate
-                          </label>
+                          <label className="block text-sm font-semibold text-gray-700 mb-3">Barangay Certificate</label>
                           <div className="bg-white rounded-lg p-2 border border-gray-300 overflow-hidden">
-                            <img 
-                              src={profileData.proof_document} 
-                              alt="Proof document"
-                              className="w-full h-40 object-cover rounded-lg"
-                            />
-                            <a 
-                              href={profileData.proof_document} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm"
-                            >
-                              <FileText className="w-4 h-4 mr-1" />
-                              View Full Document
+                            <img src={profileData.proof_document} alt="Proof document" className="w-full h-40 object-cover rounded-lg" />
+                            <a href={profileData.proof_document} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm">
+                              <FileText className="w-4 h-4 mr-1" />View Full Document
                             </a>
                           </div>
                         </div>
                       )}
-
-                      {/* Valid ID Front */}
                       {profileData.valid_id_front && (
                         <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                          <label className="block text-sm font-semibold text-gray-700 mb-3">
-                            Valid ID (Front)
-                          </label>
+                          <label className="block text-sm font-semibold text-gray-700 mb-3">Valid ID (Front)</label>
                           <div className="bg-white rounded-lg p-2 border border-gray-300 overflow-hidden">
-                            <img 
-                              src={profileData.valid_id_front} 
-                              alt="Valid ID Front"
-                              className="w-full h-40 object-cover rounded-lg"
-                            />
-                            <a 
-                              href={profileData.valid_id_front} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm"
-                            >
-                              <FileText className="w-4 h-4 mr-1" />
-                              View Full Image
+                            <img src={profileData.valid_id_front} alt="Valid ID Front" className="w-full h-40 object-cover rounded-lg" />
+                            <a href={profileData.valid_id_front} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm">
+                              <FileText className="w-4 h-4 mr-1" />View Full Image
                             </a>
                           </div>
                         </div>
                       )}
-
-                      {/* Valid ID Back */}
                       {profileData.valid_id_back && (
                         <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                          <label className="block text-sm font-semibold text-gray-700 mb-3">
-                            Valid ID (Back)
-                          </label>
+                          <label className="block text-sm font-semibold text-gray-700 mb-3">Valid ID (Back)</label>
                           <div className="bg-white rounded-lg p-2 border border-gray-300 overflow-hidden">
-                            <img 
-                              src={profileData.valid_id_back} 
-                              alt="Valid ID Back"
-                              className="w-full h-40 object-cover rounded-lg"
-                            />
-                            <a 
-                              href={profileData.valid_id_back} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm"
-                            >
-                              <FileText className="w-4 h-4 mr-1" />
-                              View Full Image
+                            <img src={profileData.valid_id_back} alt="Valid ID Back" className="w-full h-40 object-cover rounded-lg" />
+                            <a href={profileData.valid_id_back} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center text-orange-600 hover:text-orange-700 font-medium text-sm">
+                              <FileText className="w-4 h-4 mr-1" />View Full Image
                             </a>
                           </div>
                         </div>
@@ -522,29 +584,14 @@ const Profile = () => {
                 {/* Action Buttons */}
                 {isEditing && (
                   <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      className="flex items-center gap-2 px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-all font-medium"
-                    >
-                      <X className="w-4 h-4" />
-                      Cancel
+                    <button type="button" onClick={handleCancel} className="flex items-center gap-2 px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-all font-medium">
+                      <X className="w-4 h-4" />Cancel
                     </button>
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md font-medium"
-                    >
+                    <button type="submit" disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md font-medium">
                       {saving ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          Saving...
-                        </>
+                        <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Saving...</>
                       ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          Save Changes
-                        </>
+                        <><Save className="w-4 h-4" />Save Changes</>
                       )}
                     </button>
                   </div>

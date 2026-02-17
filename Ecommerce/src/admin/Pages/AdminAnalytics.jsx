@@ -8,6 +8,7 @@ const AdminAnalytics = () => {
   const [error, setError] = useState(null);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMetric, setSelectedMetric] = useState('revenue');
+  const [paymentView, setPaymentView] = useState('summary'); // 'summary' or 'transactions'
 
   const [stats, setStats] = useState({
     totalRevenue: '0',
@@ -32,6 +33,7 @@ const AdminAnalytics = () => {
   const [topProducts, setTopProducts] = useState([]);
   const [topSellers, setTopSellers] = useState([]);
   const [sellersPayment, setSellersPayment] = useState([]);
+  const [paymentTransactions, setPaymentTransactions] = useState([]); // ✅ NEW
 
   useEffect(() => {
     const run = async () => {
@@ -44,7 +46,8 @@ const AdminAnalytics = () => {
           fetchCategoryData(),
           fetchTopProducts(),
           fetchTopSellers(),
-          fetchSellersPayment()
+          fetchSellersPayment(),
+          fetchPaymentTransactions() // ✅ NEW
         ]);
       } catch (err) {
         console.error('Error loading analytics:', err);
@@ -106,6 +109,17 @@ const AdminAnalytics = () => {
     } catch (e) {
       console.error('Error fetching sellers payment:', e);
       setSellersPayment([]);
+    }
+  };
+
+  // ✅ NEW: Fetch all payment transactions (GCash + PayPal)
+  const fetchPaymentTransactions = async () => {
+    try {
+      const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/payment-transactions`);
+      if (json.success && json.data) setPaymentTransactions(json.data);
+    } catch (e) {
+      console.error('Error fetching payment transactions:', e);
+      setPaymentTransactions([]);
     }
   };
 
@@ -325,87 +339,193 @@ const AdminAnalytics = () => {
         </div>
       </div>
 
-      {/* Sellers Payment Method Table */}
+      {/* ✅ UPDATED: Seller Payment Breakdown with Tabs */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
         <div className="mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">Seller Payment Breakdown</h3>
-          <p className="text-sm text-gray-500">Orders and revenue by payment method for each seller</p>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Payment Tracking</h3>
+          <p className="text-sm text-gray-500">Track all GCash and PayPal payments with transaction IDs</p>
         </div>
 
-        {sellersPayment.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b-2 border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Seller</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Orders</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Revenue</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Orders</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Revenue</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Orders</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Revenue</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sellersPayment.map((seller, i) => (
-                  <tr key={i} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-4">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{seller.seller_name}</p>
-                        <p className="text-xs text-gray-500">{seller.seller_email}</p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        seller.gcash_orders > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {seller.gcash_orders}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <span className={`text-sm font-medium ${
-                        parseFloat(seller.gcash_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
-                      }`}>
-                        {formatCurrency(seller.gcash_revenue)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        seller.paypal_orders > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {seller.paypal_orders}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <span className={`text-sm font-medium ${
-                        parseFloat(seller.paypal_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
-                      }`}>
-                        {formatCurrency(seller.paypal_revenue)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center bg-blue-50">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-900">
-                        {seller.total_orders}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-right bg-blue-50">
-                      <span className="text-sm font-bold text-blue-900">
-                        {formatCurrency(seller.total_revenue)}
-                      </span>
-                    </td>
+        {/* ✅ Tabs */}
+        <div className="flex gap-4 mb-6 border-b border-gray-200">
+          <button
+            onClick={() => setPaymentView('summary')}
+            className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 ${
+              paymentView === 'summary'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Summary by Seller
+          </button>
+          <button
+            onClick={() => setPaymentView('transactions')}
+            className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 ${
+              paymentView === 'transactions'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            All Transactions ({paymentTransactions.length})
+          </button>
+        </div>
+
+        {/* ✅ Summary View (Original Table) */}
+        {paymentView === 'summary' && (
+          sellersPayment.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b-2 border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Seller</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Orders</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">GCash Revenue</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Orders</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">PayPal Revenue</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Orders</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider bg-blue-50">Total Revenue</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-center py-12">
-            <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-            <p className="text-gray-500 font-medium">No seller payment data available</p>
-            <p className="text-gray-400 text-sm mt-1">Data will appear once sellers have delivered orders</p>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {sellersPayment.map((seller, i) => (
+                    <tr key={i} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{seller.seller_name}</p>
+                          <p className="text-xs text-gray-500">{seller.seller_email}</p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          seller.gcash_orders > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {seller.gcash_orders}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <span className={`text-sm font-medium ${
+                          parseFloat(seller.gcash_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
+                        }`}>
+                          {formatCurrency(seller.gcash_revenue)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          seller.paypal_orders > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {seller.paypal_orders}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <span className={`text-sm font-medium ${
+                          parseFloat(seller.paypal_revenue) > 0 ? 'text-gray-900' : 'text-gray-400'
+                        }`}>
+                          {formatCurrency(seller.paypal_revenue)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-center bg-blue-50">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-900">
+                          {seller.total_orders}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right bg-blue-50">
+                        <span className="text-sm font-bold text-blue-900">
+                          {formatCurrency(seller.total_revenue)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <p className="text-gray-500 font-medium">No seller payment data available</p>
+              <p className="text-gray-400 text-sm mt-1">Data will appear once sellers have delivered orders</p>
+            </div>
+          )
+        )}
+
+        {/* ✅ NEW: Transactions View (All GCash + PayPal Transactions) */}
+        {paymentView === 'transactions' && (
+          paymentTransactions.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b-2 border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Order #</th>
+                    {/* <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Customer</th> */}
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Payment Method</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Payment Intent ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Capture ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {paymentTransactions.map((txn, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-4">
+                        <span className="font-mono text-sm font-medium text-gray-900">
+                          {txn.order_number}
+                        </span>
+                      </td>
+                      {/* <td className="px-4 py-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{txn.customer_name}</p>
+                          <p className="text-xs text-gray-500">{txn.customer_email}</p>
+                        </div>
+                      </td> */}
+                      <td className="px-4 py-4 text-right">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(txn.total_amount)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          txn.payment_method === 'gcash' 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-indigo-100 text-indigo-800'
+                        }`}>
+                          {txn.payment_method.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="font-mono text-xs text-gray-600 block truncate max-w-xs">
+                          {txn.payment_intent_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        {txn.payment_capture_id ? (
+                          <span className="font-mono text-xs text-green-600 block truncate max-w-xs">
+                            {txn.payment_capture_id}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="text-xs text-gray-600">
+                          {new Date(txn.order_date).toLocaleDateString()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <p className="text-gray-500 font-medium">No payment transactions found</p>
+              <p className="text-gray-400 text-sm mt-1">GCash and PayPal transactions will appear here</p>
+            </div>
+          )
         )}
       </div>
 
