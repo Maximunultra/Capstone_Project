@@ -5,6 +5,91 @@ import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Ha
 // const API_BASE_URL = 'http://localhost:5000/api';
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELIVERY ESTIMATE HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns delivery estimate based on city.
+ *   "legazpi" / "legazpi city"  →  Today or Tomorrow  (green)
+ *   anywhere else               →  3–4 days            (blue)
+ *
+ * @param {string}      city       - city from shipping address
+ * @param {string|Date} orderDate  - when the order was placed
+ */
+const getDeliveryEstimate = (city = '', orderDate = new Date()) => {
+  const normalized = city.trim().toLowerCase().replace(/\s+/g, '');
+  const isLegazpi  = normalized === 'legazpi' || normalized === 'legazpicity';
+  const base       = new Date(orderDate);
+
+  const fmt = (d) =>
+    d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+
+  if (isLegazpi) {
+    const today    = new Date(base);
+    const tomorrow = new Date(base);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return {
+      label  : 'Today or Tomorrow',
+      range  : `${fmt(today)} – ${fmt(tomorrow)}`,
+      days   : '0–1 day',
+      isLocal: true,
+    };
+  }
+
+  const min = new Date(base);
+  const max = new Date(base);
+  min.setDate(min.getDate() + 3);
+  max.setDate(max.getDate() + 4);
+  return {
+    label  : '3–4 Business Days',
+    range  : `${fmt(min)} – ${fmt(max)}`,
+    days   : '3–4 days',
+    isLocal: false,
+  };
+};
+
+/** Compact pill shown in the order list card */
+const DeliveryPill = ({ city, orderDate }) => {
+  if (!city) return null;
+  const est = getDeliveryEstimate(city, orderDate);
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${
+      est.isLocal ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+    }`}>
+      {est.isLocal ? '🏠' : '🚚'} {est.days}
+    </span>
+  );
+};
+
+/** Full banner shown in the order detail panel */
+const DeliveryBanner = ({ city, orderDate }) => {
+  if (!city) return null;
+  const est = getDeliveryEstimate(city, orderDate);
+  return (
+    <div className={`rounded-xl p-4 border flex gap-3 items-start ${
+      est.isLocal ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'
+    }`}>
+      <span className="text-2xl flex-shrink-0 mt-0.5">{est.isLocal ? '🏠' : '🚚'}</span>
+      <div>
+        <p className={`font-semibold text-sm ${est.isLocal ? 'text-green-800' : 'text-blue-800'}`}>
+          Estimated Delivery: {est.label}
+        </p>
+        <p className={`text-xs mt-1 font-medium ${est.isLocal ? 'text-green-700' : 'text-blue-700'}`}>
+          Expected: {est.range}
+        </p>
+        <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-600' : 'text-blue-600'}`}>
+          {est.isLocal
+            ? '📍 Within Legazpi City — same/next day delivery'
+            : '📦 Outside Legazpi City — standard delivery'}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const OrdersPage = ({ userId }) => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
@@ -53,7 +138,6 @@ const OrdersPage = ({ userId }) => {
         setSelectedOrder(data.orders[0]);
       }
 
-      // Fetch existing reviews for all products in orders
       await fetchExistingReviews(data.orders || []);
     } catch (err) {
       setError(err.message);
@@ -65,7 +149,6 @@ const OrdersPage = ({ userId }) => {
   const fetchExistingReviews = async (ordersList) => {
     try {
       const reviewsMap = {};
-      
       for (const order of ordersList) {
         if (order.order_items) {
           for (const item of order.order_items) {
@@ -75,15 +158,12 @@ const OrdersPage = ({ userId }) => {
               if (response.ok) {
                 const reviews = await response.json();
                 const userReview = reviews.find(r => r.user_id === currentUserId);
-                if (userReview) {
-                  reviewsMap[productId] = userReview;
-                }
+                if (userReview) reviewsMap[productId] = userReview;
               }
             }
           }
         }
       }
-      
       setExistingReviews(reviewsMap);
     } catch (err) {
       console.error('Error fetching existing reviews:', err);
@@ -94,7 +174,6 @@ const OrdersPage = ({ userId }) => {
     setSelectedProduct({ ...product, orderItem });
     const productId = product.id || orderItem.product_id;
     const existingReview = existingReviews[productId];
-    
     if (existingReview) {
       setRating(existingReview.rating);
       setReviewComment(existingReview.comment);
@@ -102,58 +181,37 @@ const OrdersPage = ({ userId }) => {
       setRating(0);
       setReviewComment('');
     }
-    
     setReviewError('');
     setShowReviewModal(true);
   };
 
   const handleSubmitReview = async () => {
     setReviewError('');
-    
-    if (rating === 0) {
-      setReviewError('Please select a rating');
-      return;
-    }
-    
-    if (!reviewComment.trim()) {
-      setReviewError('Please write a comment');
-      return;
-    }
-    
-    if (reviewComment.trim().length < 10) {
-      setReviewError('Comment must be at least 10 characters long');
-      return;
-    }
+    if (rating === 0) { setReviewError('Please select a rating'); return; }
+    if (!reviewComment.trim()) { setReviewError('Please write a comment'); return; }
+    if (reviewComment.trim().length < 10) { setReviewError('Comment must be at least 10 characters long'); return; }
 
     setSubmittingReview(true);
-    
     try {
-      const productId = selectedProduct.id || selectedProduct.orderItem.product_id;
+      const productId     = selectedProduct.id || selectedProduct.orderItem.product_id;
       const existingReview = existingReviews[productId];
-      
       let response;
-      
+
       if (existingReview) {
-        // Update existing review
         response = await fetch(`${API_BASE_URL}/feedback/${existingReview.id}`, {
-          method: 'PUT',
+          method : 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            rating,
-            comment: reviewComment.trim(),
-            user_id: currentUserId
-          })
+          body   : JSON.stringify({ rating, comment: reviewComment.trim(), user_id: currentUserId })
         });
       } else {
-        // Create new review
         response = await fetch(`${API_BASE_URL}/feedback`, {
-          method: 'POST',
+          method : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body   : JSON.stringify({
             product_id: parseInt(productId),
-            user_id: currentUserId,
+            user_id   : currentUserId,
             rating,
-            comment: reviewComment.trim()
+            comment   : reviewComment.trim()
           })
         });
       }
@@ -164,15 +222,11 @@ const OrdersPage = ({ userId }) => {
       }
 
       alert(existingReview ? '✅ Review updated successfully!' : '✅ Review submitted successfully!');
-      
       setShowReviewModal(false);
       setSelectedProduct(null);
       setRating(0);
       setReviewComment('');
-      
-      // Refresh to get updated reviews
       await fetchOrders();
-      
     } catch (err) {
       setReviewError(err.message);
     } finally {
@@ -182,59 +236,35 @@ const OrdersPage = ({ userId }) => {
 
   const handleSendMessage = async () => {
     setMessageError('');
-    
-    if (!messageText.trim()) {
-      setMessageError('Please enter a message');
-      return;
-    }
-
-    if (!selectedOrder || !selectedOrder.order_items || selectedOrder.order_items.length === 0) {
-      setMessageError('No order items found');
-      return;
-    }
+    if (!messageText.trim()) { setMessageError('Please enter a message'); return; }
+    if (!selectedOrder?.order_items?.length) { setMessageError('No order items found'); return; }
 
     const firstItem = selectedOrder.order_items[0];
-    const sellerId = firstItem.product?.user_id;
-    
-    if (!sellerId) {
-      setMessageError('Seller information not available');
-      return;
-    }
+    const sellerId  = firstItem.product?.user_id;
+    if (!sellerId) { setMessageError('Seller information not available'); return; }
 
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const buyerId = currentUser.id;
-
-    if (!buyerId) {
-      setMessageError('You must be logged in to send messages');
-      return;
-    }
+    if (!buyerId) { setMessageError('You must be logged in to send messages'); return; }
 
     setSendingMessage(true);
     try {
-      const messageData = {
-        sender_id: buyerId,
-        receiver_id: sellerId,
-        message: messageText.trim(),
-        order_id: parseInt(selectedOrder.id),
-        product_id: parseInt(firstItem.product_id || firstItem.product?.id)
-      };
-
       const response = await fetch(`${API_BASE_URL}/messages`, {
-        method: 'POST',
+        method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(messageData)
+        body   : JSON.stringify({
+          sender_id  : buyerId,
+          receiver_id: sellerId,
+          message    : messageText.trim(),
+          order_id   : parseInt(selectedOrder.id),
+          product_id : parseInt(firstItem.product_id || firstItem.product?.id)
+        })
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send message');
-      }
-
+      if (!response.ok) throw new Error(data.error || 'Failed to send message');
       setMessageText('');
       setShowMessageModal(false);
       alert('✅ Message sent successfully!');
-      
     } catch (err) {
       setMessageError(err.message);
     } finally {
@@ -244,91 +274,52 @@ const OrdersPage = ({ userId }) => {
 
   const canMessageSeller = (order) => {
     if (!order) return false;
-    const activeStatuses = ['pending', 'processing', 'shipped', 'delivered'];
-    return activeStatuses.includes(order.order_status.toLowerCase());
+    return ['pending', 'processing', 'shipped', 'delivered'].includes(order.order_status.toLowerCase());
   };
 
-  const canReviewProduct = (order) => {
-    if (!order) return false;
-    return order.order_status.toLowerCase() === 'delivered';
-  };
+  const canReviewProduct = (order) =>
+    order?.order_status.toLowerCase() === 'delivered';
 
   const getStatusColor = (status) => {
     const colors = {
-      'pending': 'bg-amber-100 text-amber-800 border-amber-200',
-      'processing': 'bg-blue-100 text-blue-800 border-blue-200',
-      'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
-      'delivered': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-      'canceled': 'bg-red-100 text-red-800 border-red-200'
+      pending   : 'bg-amber-100 text-amber-800 border-amber-200',
+      processing: 'bg-blue-100 text-blue-800 border-blue-200',
+      shipped   : 'bg-purple-100 text-purple-800 border-purple-200',
+      delivered : 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      canceled  : 'bg-red-100 text-red-800 border-red-200',
     };
     return colors[status] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'pending':
-        return <Clock className="w-4 h-4" />;
-      case 'processing':
-        return <Package className="w-4 h-4" />;
-      case 'shipped':
-        return <Truck className="w-4 h-4" />;
-      case 'delivered':
-        return <CheckCircle className="w-4 h-4" />;
-      case 'canceled':
-        return (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        );
-      default:
-        return <Clock className="w-4 h-4" />;
+      case 'pending'   : return <Clock className="w-4 h-4" />;
+      case 'processing': return <Package className="w-4 h-4" />;
+      case 'shipped'   : return <Truck className="w-4 h-4" />;
+      case 'delivered' : return <CheckCircle className="w-4 h-4" />;
+      case 'canceled'  :
+        return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+      default: return <Clock className="w-4 h-4" />;
     }
   };
 
-  const getOrderProgress = (status) => {
-    const progressMap = {
-      'pending': 25,
-      'processing': 50,
-      'shipped': 75,
-      'delivered': 100,
-      'canceled': 0
-    };
-    return progressMap[status] || 0;
-  };
+  const getOrderProgress = (status) =>
+    ({ pending: 25, processing: 50, shipped: 75, delivered: 100, canceled: 0 }[status] || 0);
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString) =>
+    new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const formatDateTime = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatDateTime = (dateString) =>
+    new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const handleCancelOrder = async (orderId) => {
-    if (!window.confirm('Are you sure you want to cancel this order?')) {
-      return;
-    }
-
+    if (!window.confirm('Are you sure you want to cancel this order?')) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
-        method: 'DELETE'
-      });
-
+      const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, { method: 'DELETE' });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to cancel order');
       }
-
       alert('Order canceled successfully');
       fetchOrders();
     } catch (err) {
@@ -337,12 +328,12 @@ const OrdersPage = ({ userId }) => {
   };
 
   const statusCounts = {
-    all: orders.length,
-    pending: orders.filter(o => o.order_status === 'pending').length,
+    all       : orders.length,
+    pending   : orders.filter(o => o.order_status === 'pending').length,
     processing: orders.filter(o => o.order_status === 'processing').length,
-    shipped: orders.filter(o => o.order_status === 'shipped').length,
-    delivered: orders.filter(o => o.order_status === 'delivered').length,
-    canceled: orders.filter(o => o.order_status === 'canceled').length
+    shipped   : orders.filter(o => o.order_status === 'shipped').length,
+    delivered : orders.filter(o => o.order_status === 'delivered').length,
+    canceled  : orders.filter(o => o.order_status === 'canceled').length,
   };
 
   if (loading && orders.length === 0) {
@@ -359,24 +350,23 @@ const OrdersPage = ({ userId }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Status Filter Tabs */}
+
+        {/* ── Status Filter Tabs ── */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6 overflow-hidden">
           <div className="flex overflow-x-auto">
             {[
-              { key: 'all', label: 'All Orders' },
-              { key: 'pending', label: 'Pending' },
-              { key: 'processing', label: 'Processing' },
-              { key: 'shipped', label: 'Shipped' },
-              { key: 'delivered', label: 'Delivered' },
-              { key: 'canceled', label: 'Canceled' }
+              { key: 'all',        label: 'All Orders'  },
+              { key: 'pending',    label: 'Pending'     },
+              { key: 'processing', label: 'Processing'  },
+              { key: 'shipped',    label: 'Shipped'     },
+              { key: 'delivered',  label: 'Delivered'   },
+              { key: 'canceled',   label: 'Canceled'    },
             ].map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setSelectedStatus(key)}
                 className={`px-6 py-4 font-semibold transition whitespace-nowrap relative ${
-                  selectedStatus === key
-                    ? 'text-blue-600 bg-blue-50'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  selectedStatus === key ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
                 {label}
@@ -395,14 +385,12 @@ const OrdersPage = ({ userId }) => {
           </div>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <p className="text-red-700">Error: {error}</p>
           </div>
         )}
 
-        {/* Main Content */}
         {orders.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 text-center">
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -410,27 +398,23 @@ const OrdersPage = ({ userId }) => {
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">No orders found</h2>
             <p className="text-gray-600 mb-8">
-              {selectedStatus === 'all'
-                ? "You haven't placed any orders yet"
-                : `You don't have any ${selectedStatus} orders`}
+              {selectedStatus === 'all' ? "You haven't placed any orders yet" : `You don't have any ${selectedStatus} orders`}
             </p>
-            <button
-              onClick={() => navigate('/buyer/products')}
-              className="bg-blue-600 text-white px-8 py-4 rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg hover:shadow-xl"
-            >
+            <button onClick={() => navigate('/buyer/products')} className="bg-blue-600 text-white px-8 py-4 rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg hover:shadow-xl">
               Start Shopping
             </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Orders List - Left Panel */}
-            <div className="lg:col-span-1 space-y-3">
+
+            {/* ── LEFT: Orders List ── */}
+            <div className="lg:col-span-1">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100">
                   <h2 className="font-bold text-gray-900">Order History</h2>
                   <p className="text-sm text-gray-600">{orders.length} order{orders.length !== 1 ? 's' : ''}</p>
                 </div>
-                
+
                 <div className="divide-y divide-gray-100 max-h-[calc(100vh-300px)] overflow-y-auto">
                   {orders.map((order) => (
                     <div
@@ -440,24 +424,22 @@ const OrdersPage = ({ userId }) => {
                         selectedOrder?.id === order.id ? 'bg-blue-50 border-l-4 border-blue-600' : ''
                       }`}
                     >
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1.5">
                         <Hash className="w-4 h-4 text-gray-400" />
                         <p className="font-mono text-sm font-semibold text-gray-900">{order.order_number}</p>
                       </div>
-
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1.5">
                         <Calendar className="w-4 h-4 text-gray-400" />
                         <p className="text-sm text-gray-600">{formatDate(order.order_date)}</p>
                       </div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-gray-500">Total</p>
+                        <p className="font-bold text-gray-900">₱{parseFloat(order.total_amount).toFixed(2)}</p>
+                      </div>
 
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-500 text-base font-medium leading-none">₱</span>
-                          <p className="text-sm text-gray-600">Total</p>
-                        </div>
-                        <p className="font-bold text-gray-900">
-                          ₱{parseFloat(order.total_amount).toFixed(2)}
-                        </p>
+                      {/* ✅ Delivery pill in order list */}
+                      <div className="mb-2">
+                        <DeliveryPill city={order.shipping_city} orderDate={order.order_date} />
                       </div>
 
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.order_status)}`}>
@@ -470,10 +452,11 @@ const OrdersPage = ({ userId }) => {
               </div>
             </div>
 
-            {/* Order Details - Right Panel */}
+            {/* ── RIGHT: Order Detail Panel ── */}
             <div className="lg:col-span-2">
               {selectedOrder ? (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
                   {/* Order Header */}
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-gray-100">
                     <div className="flex items-start justify-between mb-4">
@@ -491,46 +474,52 @@ const OrdersPage = ({ userId }) => {
                     <div className="relative mt-6">
                       <div className="flex justify-between mb-3">
                         {[
-                          { status: 'pending', icon: Clock, label: 'Pending' },
-                          { status: 'processing', icon: Package, label: 'Processing' },
-                          { status: 'shipped', icon: Truck, label: 'Shipped' },
-                          { status: 'delivered', icon: CheckCircle, label: 'Delivered' }
+                          { status: 'pending',    icon: Clock,       label: 'Pending'    },
+                          { status: 'processing', icon: Package,     label: 'Processing' },
+                          { status: 'shipped',    icon: Truck,       label: 'Shipped'    },
+                          { status: 'delivered',  icon: CheckCircle, label: 'Delivered'  },
                         ].map(({ status, icon: Icon, label }) => {
-                          const isActive = ['pending', 'processing', 'shipped', 'delivered'].indexOf(selectedOrder.order_status) >= 
-                                          ['pending', 'processing', 'shipped', 'delivered'].indexOf(status);
-                          const isCurrentStep = selectedOrder.order_status === status;
-                          
+                          const steps    = ['pending', 'processing', 'shipped', 'delivered'];
+                          const isActive = steps.indexOf(selectedOrder.order_status) >= steps.indexOf(status);
+                          const isCurrent = selectedOrder.order_status === status;
                           return (
                             <div key={status} className="flex flex-col items-center flex-1">
                               <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                                isActive 
-                                  ? isCurrentStep && status === 'delivered'
+                                isActive
+                                  ? isCurrent && status === 'delivered'
                                     ? 'bg-emerald-600 text-white ring-4 ring-emerald-100'
                                     : 'bg-blue-600 text-white'
                                   : 'bg-gray-200 text-gray-400'
                               }`}>
                                 <Icon className="w-5 h-5" />
                               </div>
-                              <span className={`text-xs mt-2 font-medium ${isActive ? 'text-gray-900' : 'text-gray-500'}`}>
-                                {label}
-                              </span>
+                              <span className={`text-xs mt-2 font-medium ${isActive ? 'text-gray-900' : 'text-gray-500'}`}>{label}</span>
                             </div>
                           );
                         })}
                       </div>
-                      
-                      <div className="absolute top-5 left-0 w-full h-0.5 bg-gray-200 -z-10" style={{ marginLeft: '20px', marginRight: '20px', width: 'calc(100% - 40px)' }}>
-                        <div 
-                          className="h-full bg-blue-600 transition-all duration-500" 
-                          style={{ width: `${getOrderProgress(selectedOrder.order_status)}%` }}
-                        ></div>
+                      <div className="absolute top-5 left-0 w-full h-0.5 bg-gray-200 -z-10" style={{ marginLeft: '20px', width: 'calc(100% - 40px)' }}>
+                        <div className="h-full bg-blue-600 transition-all duration-500" style={{ width: `${getOrderProgress(selectedOrder.order_status)}%` }}></div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Order Content */}
+                  {/* Order Body */}
                   <div className="p-6 space-y-6">
-                    {/* Shipment Dates & Tracking */}
+
+                    {/* ✅ DELIVERY ESTIMATE — shown prominently at the top of order details */}
+                    <div>
+                      <h3 className="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <Truck className="w-5 h-5 text-blue-600" />
+                        Estimated Delivery
+                      </h3>
+                      <DeliveryBanner
+                        city={selectedOrder.shipping_city}
+                        orderDate={selectedOrder.order_date}
+                      />
+                    </div>
+
+                    {/* Order Placed + Tracking */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="bg-gray-50 rounded-xl p-4">
                         <div className="flex items-center gap-3">
@@ -565,17 +554,15 @@ const OrdersPage = ({ userId }) => {
                         <MapPin className="w-5 h-5 text-blue-600" />
                         Delivery Address
                       </h3>
-                      <div className="bg-gray-50 rounded-xl p-5">
-                        <div className="space-y-2">
-                          <p className="font-semibold text-gray-900 text-lg">{selectedOrder.shipping_full_name}</p>
-                          <p className="text-gray-600">{selectedOrder.shipping_phone}</p>
-                          <p className="text-gray-600">{selectedOrder.shipping_email}</p>
-                          <div className="pt-2 border-t border-gray-200">
-                            <p className="text-gray-700 leading-relaxed">
-                              {selectedOrder.shipping_address}<br />
-                              {selectedOrder.shipping_city}, {selectedOrder.shipping_province} {selectedOrder.shipping_postal_code}
-                            </p>
-                          </div>
+                      <div className="bg-gray-50 rounded-xl p-5 space-y-1.5">
+                        <p className="font-semibold text-gray-900 text-lg">{selectedOrder.shipping_full_name}</p>
+                        <p className="text-gray-600">{selectedOrder.shipping_phone}</p>
+                        <p className="text-gray-600">{selectedOrder.shipping_email}</p>
+                        <div className="pt-2 border-t border-gray-200">
+                          <p className="text-gray-700 leading-relaxed">
+                            {selectedOrder.shipping_address}<br />
+                            {selectedOrder.shipping_city}, {selectedOrder.shipping_province} {selectedOrder.shipping_postal_code}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -588,45 +575,35 @@ const OrdersPage = ({ userId }) => {
                       </h3>
                       <div className="space-y-3">
                         {selectedOrder.order_items?.map((item, index) => {
-                          const productId = item.product_id || item.product?.id;
-                          const hasReview = existingReviews[productId];
-                          
+                          const productId  = item.product_id || item.product?.id;
+                          const hasReview  = existingReviews[productId];
                           return (
                             <div key={index} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition">
                               <div className="flex gap-4">
                                 <div className="w-20 h-20 bg-white rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
                                   {item.product?.product_image ? (
-                                    <img 
-                                      src={item.product.product_image} 
-                                      alt={item.product_name} 
-                                      className="w-full h-full object-cover" 
-                                    />
+                                    <img src={item.product.product_image} alt={item.product_name} className="w-full h-full object-cover" />
                                   ) : (
                                     <div className="w-full h-full flex items-center justify-center text-gray-300">
                                       <Package className="w-8 h-8" />
                                     </div>
                                   )}
                                 </div>
-
                                 <div className="flex-1">
                                   <h4 className="font-semibold text-gray-900 mb-1">{item.product_name}</h4>
-                                  
                                   {item.product?.brand && (
                                     <div className="flex items-center gap-2 mb-2">
                                       <User className="w-3.5 h-3.5 text-gray-400" />
                                       <p className="text-sm text-gray-600">Seller: <span className="font-medium">{item.product.brand}</span></p>
                                     </div>
                                   )}
-
                                   <div className="flex items-center justify-between mt-2">
-                                    <p className="text-sm text-gray-600">Quantity: <span className="font-semibold text-gray-900">{item.quantity}</span></p>
+                                    <p className="text-sm text-gray-600">Qty: <span className="font-semibold text-gray-900">{item.quantity}</span></p>
                                     <div className="text-right">
-                                      <p className="text-sm text-gray-600">Unit Price</p>
+                                      <p className="text-xs text-gray-500">Unit Price</p>
                                       <p className="font-bold text-gray-900">₱{parseFloat(item.unit_price).toFixed(2)}</p>
                                     </div>
                                   </div>
-
-                                  {/* Review Button for Delivered Orders */}
                                   {canReviewProduct(selectedOrder) && (
                                     <div className="mt-3">
                                       <button
@@ -653,41 +630,39 @@ const OrdersPage = ({ userId }) => {
                     {/* Cost Summary */}
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <span className="text-blue-600 text-large">₱</span>
+                        <span className="text-blue-600 font-bold text-lg">₱</span>
                         Order Summary
                       </h3>
-                      <div className="bg-gray-50 rounded-xl p-6">
-                        <div className="space-y-3">
-                          <div className="flex justify-between text-gray-700">
-                            <span>Subtotal</span>
-                            <span className="font-semibold">₱{parseFloat(selectedOrder.subtotal).toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-gray-700">
-                            <span>Tax</span>
-                            <span className="font-semibold">₱{parseFloat(selectedOrder.tax).toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-gray-700">
-                            <span>Shipping Fee</span>
-                            <span className="font-semibold">₱{parseFloat(selectedOrder.shipping_fee).toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-gray-700">
-                            <span>Payment Method</span>
-                            <span className="font-semibold uppercase">{selectedOrder.payment_method}</span>
-                          </div>
-                          <div className="border-t-2 border-gray-300 pt-3 mt-3">
-                            <div className="flex justify-between items-center">
-                              <span className="text-xl font-bold text-gray-900">Total Amount</span>
-                              <span className="text-3xl font-bold text-blue-600">₱{parseFloat(selectedOrder.total_amount).toFixed(2)}</span>
-                            </div>
+                      <div className="bg-gray-50 rounded-xl p-6 space-y-3">
+                        <div className="flex justify-between text-gray-700">
+                          <span>Subtotal</span>
+                          <span className="font-semibold">₱{parseFloat(selectedOrder.subtotal).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-700">
+                          <span>Platform Fee</span>
+                          <span className="font-semibold">₱{parseFloat(selectedOrder.tax).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-700">
+                          <span>Shipping Fee</span>
+                          <span className="font-semibold">₱{parseFloat(selectedOrder.shipping_fee).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-700">
+                          <span>Payment Method</span>
+                          <span className="font-semibold uppercase">{selectedOrder.payment_method}</span>
+                        </div>
+                        <div className="border-t-2 border-gray-300 pt-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xl font-bold text-gray-900">Total Amount</span>
+                            <span className="text-3xl font-bold text-blue-600">₱{parseFloat(selectedOrder.total_amount).toFixed(2)}</span>
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex gap-3 pt-4">
+                    <div className="flex gap-3 pt-2">
                       {canMessageSeller(selectedOrder) && (
-                        <button 
+                        <button
                           onClick={() => setShowMessageModal(true)}
                           className="flex-1 bg-blue-600 text-white py-4 px-6 rounded-xl hover:bg-blue-700 transition font-semibold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                         >
@@ -695,9 +670,8 @@ const OrdersPage = ({ userId }) => {
                           Message Seller
                         </button>
                       )}
-                      
                       {selectedOrder.order_status === 'pending' && (
-                        <button 
+                        <button
                           onClick={() => handleCancelOrder(selectedOrder.id)}
                           className="flex-1 bg-red-50 text-red-600 py-4 px-6 rounded-xl hover:bg-red-100 transition font-semibold border-2 border-red-200"
                         >
@@ -718,7 +692,7 @@ const OrdersPage = ({ userId }) => {
         )}
       </div>
 
-      {/* Message Seller Modal */}
+      {/* ── Message Seller Modal ── */}
       {showMessageModal && selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
@@ -730,29 +704,17 @@ const OrdersPage = ({ userId }) => {
                   <p className="text-sm text-blue-100">Order #{selectedOrder.order_number}</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowMessageModal(false);
-                  setMessageText('');
-                  setMessageError('');
-                }}
-                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
-              >
+              <button onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }} className="text-white hover:bg-white/20 rounded-lg p-2 transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
             <div className="p-6">
-              {selectedOrder.order_items && selectedOrder.order_items.length > 0 && (
+              {selectedOrder.order_items?.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <p className="text-sm text-gray-600 mb-2">Product:</p>
                   <div className="flex items-center gap-3">
                     {selectedOrder.order_items[0].product?.product_image && (
-                      <img
-                        src={selectedOrder.order_items[0].product.product_image}
-                        alt={selectedOrder.order_items[0].product_name}
-                        className="w-12 h-12 object-cover rounded-lg"
-                      />
+                      <img src={selectedOrder.order_items[0].product.product_image} alt={selectedOrder.order_items[0].product_name} className="w-12 h-12 object-cover rounded-lg" />
                     )}
                     <div>
                       <p className="font-semibold text-gray-900">{selectedOrder.order_items[0].product_name}</p>
@@ -763,72 +725,27 @@ const OrdersPage = ({ userId }) => {
                   </div>
                 </div>
               )}
-
-              {messageError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-700">{messageError}</p>
-                </div>
-              )}
-
+              {messageError && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg"><p className="text-sm text-red-700">{messageError}</p></div>}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Your Message
-                </label>
-                <textarea
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Type your message to the seller here..."
-                  className="w-full h-40 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none"
-                  disabled={sendingMessage}
-                  maxLength={500}
-                />
-                <p className="text-sm text-gray-500 mt-2">
-                  {messageText.length} / 500 characters
-                </p>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Your Message</label>
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} placeholder="Type your message to the seller here..." className="w-full h-40 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none" disabled={sendingMessage} maxLength={500} />
+                <p className="text-sm text-gray-500 mt-2">{messageText.length} / 500 characters</p>
               </div>
-
               <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>Note:</strong> This message will be sent directly to the seller.
-                </p>
+                <p className="text-sm text-blue-800"><strong>Note:</strong> This message will be sent directly to the seller.</p>
               </div>
             </div>
-
             <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
-              <button
-                onClick={() => {
-                  setShowMessageModal(false);
-                  setMessageText('');
-                  setMessageError('');
-                }}
-                disabled={sendingMessage}
-                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendMessage}
-                disabled={!messageText.trim() || sendingMessage}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {sendingMessage ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-5 h-5" />
-                    Send Message
-                  </>
-                )}
+              <button onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }} disabled={sendingMessage} className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50">Cancel</button>
+              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendingMessage} className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {sendingMessage ? (<><div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>Sending...</>) : (<><Send className="w-5 h-5" />Send Message</>)}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Review Modal */}
+      {/* ── Review Modal ── */}
       {showReviewModal && selectedProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
@@ -842,68 +759,25 @@ const OrdersPage = ({ userId }) => {
                   <p className="text-sm text-amber-100">Share your experience</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowReviewModal(false);
-                  setSelectedProduct(null);
-                  setRating(0);
-                  setReviewComment('');
-                  setReviewError('');
-                }}
-                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
-              >
+              <button onClick={() => { setShowReviewModal(false); setSelectedProduct(null); setRating(0); setReviewComment(''); setReviewError(''); }} className="text-white hover:bg-white/20 rounded-lg p-2 transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
             <div className="p-6">
-              {/* Product Info */}
               <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-sm text-gray-600 mb-2">Product:</p>
                 <div className="flex items-center gap-3">
-                  {selectedProduct.product_image && (
-                    <img
-                      src={selectedProduct.product_image}
-                      alt={selectedProduct.product_name || selectedProduct.orderItem.product_name}
-                      className="w-16 h-16 object-cover rounded-lg"
-                    />
-                  )}
-                  <div>
-                    <p className="font-semibold text-gray-900">
-                      {selectedProduct.product_name || selectedProduct.orderItem.product_name}
-                    </p>
-                  </div>
+                  {selectedProduct.product_image && <img src={selectedProduct.product_image} alt={selectedProduct.product_name || selectedProduct.orderItem.product_name} className="w-16 h-16 object-cover rounded-lg" />}
+                  <p className="font-semibold text-gray-900">{selectedProduct.product_name || selectedProduct.orderItem.product_name}</p>
                 </div>
               </div>
-
-              {/* Error Message */}
-              {reviewError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-700">{reviewError}</p>
-                </div>
-              )}
-
-              {/* Star Rating */}
+              {reviewError && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg"><p className="text-sm text-red-700">{reviewError}</p></div>}
               <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-700 mb-3">
-                  Your Rating
-                </label>
+                <label className="block text-sm font-semibold text-gray-700 mb-3">Your Rating</label>
                 <div className="flex gap-2">
                   {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      onMouseEnter={() => setHoverRating(star)}
-                      onMouseLeave={() => setHoverRating(0)}
-                      onClick={() => setRating(star)}
-                      className="transition-transform hover:scale-125"
-                    >
-                      <svg
-                        className={`w-10 h-10 ${
-                          star <= (hoverRating || rating) ? 'text-yellow-400' : 'text-gray-300'
-                        }`}
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
+                    <button key={star} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(star)} className="transition-transform hover:scale-125">
+                      <svg className={`w-10 h-10 ${star <= (hoverRating || rating) ? 'text-yellow-400' : 'text-gray-300'}`} fill="currentColor" viewBox="0 0 20 20">
                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                       </svg>
                     </button>
@@ -911,72 +785,23 @@ const OrdersPage = ({ userId }) => {
                 </div>
                 {rating > 0 && (
                   <p className="text-sm text-gray-600 mt-2">
-                    {rating === 1 && '⭐ Poor'}
-                    {rating === 2 && '⭐⭐ Fair'}
-                    {rating === 3 && '⭐⭐⭐ Good'}
-                    {rating === 4 && '⭐⭐⭐⭐ Very Good'}
-                    {rating === 5 && '⭐⭐⭐⭐⭐ Excellent'}
+                    {rating === 1 && '⭐ Poor'}{rating === 2 && '⭐⭐ Fair'}{rating === 3 && '⭐⭐⭐ Good'}{rating === 4 && '⭐⭐⭐⭐ Very Good'}{rating === 5 && '⭐⭐⭐⭐⭐ Excellent'}
                   </p>
                 )}
               </div>
-
-              {/* Review Comment */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Your Review
-                </label>
-                <textarea
-                  value={reviewComment}
-                  onChange={(e) => setReviewComment(e.target.value)}
-                  placeholder="Share your experience with this product... (minimum 10 characters)"
-                  className="w-full h-32 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition resize-none"
-                  disabled={submittingReview}
-                  maxLength={500}
-                />
-                <p className="text-sm text-gray-500 mt-2">
-                  {reviewComment.length} / 500 characters
-                </p>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Your Review</label>
+                <textarea value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} placeholder="Share your experience with this product... (minimum 10 characters)" className="w-full h-32 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition resize-none" disabled={submittingReview} maxLength={500} />
+                <p className="text-sm text-gray-500 mt-2">{reviewComment.length} / 500 characters</p>
               </div>
-
-              {/* Info Box */}
               <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800">
-                  <strong>Note:</strong> Your review will be visible to all users and will help others make informed decisions.
-                </p>
+                <p className="text-sm text-amber-800"><strong>Note:</strong> Your review will be visible to all users and will help others make informed decisions.</p>
               </div>
             </div>
-
-            {/* Modal Footer */}
             <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
-              <button
-                onClick={() => {
-                  setShowReviewModal(false);
-                  setSelectedProduct(null);
-                  setRating(0);
-                  setReviewComment('');
-                  setReviewError('');
-                }}
-                disabled={submittingReview}
-                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitReview}
-                disabled={rating === 0 || !reviewComment.trim() || submittingReview}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-lg hover:from-amber-600 hover:to-orange-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {submittingReview ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Star className="w-5 h-5" />
-                    {existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Update Review' : 'Submit Review'}
-                  </>
-                )}
+              <button onClick={() => { setShowReviewModal(false); setSelectedProduct(null); setRating(0); setReviewComment(''); setReviewError(''); }} disabled={submittingReview} className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50">Cancel</button>
+              <button onClick={handleSubmitReview} disabled={rating === 0 || !reviewComment.trim() || submittingReview} className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-lg hover:from-amber-600 hover:to-orange-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {submittingReview ? (<><div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>Submitting...</>) : (<><Star className="w-5 h-5" />{existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Update Review' : 'Submit Review'}</>)}
               </button>
             </div>
           </div>
