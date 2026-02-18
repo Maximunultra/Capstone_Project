@@ -5,7 +5,10 @@ import { Eye, EyeOff, Mail, Lock, Scissors, Heart, CheckCircle, AlertCircle, X }
 
 // Toast Notification Component
 function Toast({ message, type, onClose }) {
-  const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-amber-500';
+  const bgColor = type === 'success' ? 'bg-green-500' 
+                : type === 'error' ? 'bg-red-500' 
+                : type === 'warning' ? 'bg-amber-500'
+                : 'bg-blue-500';
   const Icon = type === 'success' ? CheckCircle : AlertCircle;
 
   return (
@@ -35,7 +38,7 @@ export default function Login({ onAuthChange }) {
   // Toast helper function
   const showToast = (message, type = 'info') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000); // Auto-dismiss after 4 seconds
+    setTimeout(() => setToast(null), 5000); // Auto-dismiss after 5 seconds (increased for longer messages)
   };
 
   const handleLogin = async () => {
@@ -84,7 +87,12 @@ export default function Login({ onAuthChange }) {
         showToast('Invalid response from server', 'error');
       }
     } catch (err) {
-      showToast(err.response?.data?.error || 'Login failed! Please try again.', 'error');
+      // ✅ Handle seller approval status errors (403)
+      if (err.response?.status === 403) {
+        showToast(err.response?.data?.error || 'Account not approved', 'warning');
+      } else {
+        showToast(err.response?.data?.error || 'Login failed! Please try again.', 'error');
+      }
     } finally {
       setLoading(false);
     }

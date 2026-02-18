@@ -8,7 +8,7 @@ const PromotionManagementPage = () => {
   const navigate = useNavigate();
   const [promotions, setPromotions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, pending, approved, rejected, active
+  const [filter, setFilter] = useState('all');
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = currentUser.id;
@@ -26,7 +26,6 @@ const PromotionManagementPage = () => {
         params.append('status', filter);
       }
       
-      // If seller, only show their promotions
       if (userRole === 'seller') {
         params.append('user_id', userId);
       }
@@ -227,7 +226,7 @@ const PromotionManagementPage = () => {
                               <div>
                                 <p className="font-semibold text-gray-900">{promotion.products.product_name}</p>
                                 <p className="text-sm text-gray-600">{promotion.products.category}</p>
-                                <p className="text-sm font-bold text-blue-600">${promotion.products.price}</p>
+                                <p className="text-sm font-bold text-blue-600">₱{promotion.products.price}</p>
                               </div>
                             </div>
                           )}
@@ -239,18 +238,15 @@ const PromotionManagementPage = () => {
                             </p>
                           )}
 
+                          {/* ✅ UPDATED: Removed commission_increase card */}
                           {/* Promotion Details Grid */}
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-3">
                             {promotion.discount_percentage > 0 && (
                               <div className="bg-red-50 rounded-lg p-3">
                                 <p className="text-xs text-gray-600 mb-1">Discount</p>
                                 <p className="text-lg font-bold text-red-600">{promotion.discount_percentage}% OFF</p>
                               </div>
                             )}
-                            <div className="bg-green-50 rounded-lg p-3">
-                              <p className="text-xs text-gray-600 mb-1">Commission +</p>
-                              <p className="text-lg font-bold text-green-600">{promotion.commission_increase}%</p>
-                            </div>
                             <div className="bg-blue-50 rounded-lg p-3">
                               <p className="text-xs text-gray-600 mb-1">Start Date</p>
                               <p className="text-sm font-semibold text-blue-900">{formatDate(promotion.start_date)}</p>

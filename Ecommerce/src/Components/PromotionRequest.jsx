@@ -17,12 +17,11 @@ const PromotionRequestPage = () => {
   const userId = currentUser.id;
   const userRole = currentUser.role;
 
-  // Form state
+  // ✅ UPDATED: Removed commission_increase
   const [formData, setFormData] = useState({
     product_id: '',
     promotion_title: '',
     promotion_description: '',
-    commission_increase: '',
     start_date: '',
     end_date: '',
     banner_image: '',
@@ -55,38 +54,32 @@ const PromotionRequestPage = () => {
       [name]: value
     }));
 
-    // Clear error for this field
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
   };
 
-  // Handle image file selection
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
     
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       alert('Please select an image file');
       return;
     }
 
-    // Validate file size (5MB max)
     if (file.size > 5 * 1024 * 1024) {
       alert('Image size should be less than 5MB');
       return;
     }
 
-    // Create preview
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result);
     };
     reader.readAsDataURL(file);
 
-    // Upload image
     setUploadingImage(true);
     try {
       const formData = new FormData();
@@ -119,7 +112,6 @@ const PromotionRequestPage = () => {
     }
   };
 
-  // Remove uploaded image
   const handleRemoveImage = () => {
     setFormData(prev => ({
       ...prev,
@@ -141,10 +133,6 @@ const PromotionRequestPage = () => {
 
     if (!formData.promotion_description.trim()) {
       newErrors.promotion_description = 'Promotion description is required';
-    }
-
-    if (!formData.commission_increase || formData.commission_increase < 0 || formData.commission_increase > 50) {
-      newErrors.commission_increase = 'Commission increase must be between 0-50%';
     }
 
     if (!formData.start_date) {
@@ -174,19 +162,18 @@ const PromotionRequestPage = () => {
     setLoading(true);
 
     try {
+      // ✅ UPDATED: Removed commission_increase
       const submitData = {
         user_id: userId,
         product_id: parseInt(formData.product_id),
-        promotion_type: 'banner', // Default to banner
+        promotion_type: 'banner',
         promotion_title: formData.promotion_title.trim(),
         promotion_description: formData.promotion_description.trim(),
-        discount_percentage: 0, // No discount for banner ads
-        commission_increase: parseFloat(formData.commission_increase),
         start_date: formData.start_date,
         end_date: formData.end_date,
         banner_image: formData.banner_image.trim(),
         target_audience: formData.target_audience,
-        status: 'pending' // Will be approved by admin
+        status: 'pending'
       };
 
       const response = await fetch(`${API_BASE_URL}/promotions`, {
@@ -204,7 +191,6 @@ const PromotionRequestPage = () => {
 
       alert('Promotion request submitted successfully! Waiting for admin approval.');
       
-      // Navigate back based on role
       if (userRole === 'seller') {
         navigate('/seller/promotions');
       } else if (userRole === 'admin') {
@@ -223,7 +209,6 @@ const PromotionRequestPage = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <button
             onClick={() => navigate(-1)}
@@ -238,7 +223,6 @@ const PromotionRequestPage = () => {
           <p className="text-gray-600 mt-2">Submit a banner promotion request for admin approval</p>
         </div>
 
-        {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-lg p-8">
           {loadingProducts ? (
             <div className="text-center py-8">
@@ -273,7 +257,7 @@ const PromotionRequestPage = () => {
                   <option value="">-- Select a product --</option>
                   {products.map(product => (
                     <option key={product.id} value={product.id}>
-                      {product.product_name} - ${product.price} (Stock: {product.stock_quantity})
+                      {product.product_name} - ₱{product.price} (Stock: {product.stock_quantity})
                     </option>
                   ))}
                 </select>
@@ -281,7 +265,6 @@ const PromotionRequestPage = () => {
                   <p className="mt-1 text-sm text-red-500">{errors.product_id}</p>
                 )}
 
-                {/* Product Preview */}
                 {selectedProduct && (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-4">
@@ -295,7 +278,7 @@ const PromotionRequestPage = () => {
                       <div>
                         <h3 className="font-semibold text-gray-900">{selectedProduct.product_name}</h3>
                         <p className="text-sm text-gray-600">{selectedProduct.category}</p>
-                        <p className="text-lg font-bold text-blue-600 mt-1">${selectedProduct.price}</p>
+                        <p className="text-lg font-bold text-blue-600 mt-1">₱{selectedProduct.price}</p>
                       </div>
                     </div>
                   </div>
@@ -342,35 +325,8 @@ const PromotionRequestPage = () => {
                 )}
               </div>
 
-              {/* Commission Increase */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Commission Increase (%) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  name="commission_increase"
-                  value={formData.commission_increase}
-                  onChange={handleChange}
-                  min="0"
-                  max="50"
-                  step="0.01"
-                  className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${
-                    errors.commission_increase ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                  placeholder="e.g., 5"
-                />
-                {errors.commission_increase && (
-                  <p className="mt-1 text-sm text-red-500">{errors.commission_increase}</p>
-                )}
-                <p className="mt-1 text-sm text-gray-500">
-                  Platform commission will increase by this percentage during promotion
-                </p>
-              </div>
-
               {/* Date Range */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Start Date */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Start Date <span className="text-red-500">*</span>
@@ -389,7 +345,6 @@ const PromotionRequestPage = () => {
                   )}
                 </div>
 
-                {/* End Date */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     End Date <span className="text-red-500">*</span>
@@ -415,7 +370,6 @@ const PromotionRequestPage = () => {
                   Banner/Advertisement Image {formData.banner_image && <span className="text-green-600">(Uploaded)</span>}
                 </label>
                 
-                {/* Upload Button */}
                 {!formData.banner_image && (
                   <div className="mt-2">
                     <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition">
@@ -439,7 +393,6 @@ const PromotionRequestPage = () => {
                   </div>
                 )}
 
-                {/* Loading State */}
                 {uploadingImage && (
                   <div className="mt-3 flex items-center justify-center p-4 bg-blue-50 rounded-lg">
                     <svg className="animate-spin h-5 w-5 text-blue-600 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -450,7 +403,6 @@ const PromotionRequestPage = () => {
                   </div>
                 )}
 
-                {/* Image Preview */}
                 {formData.banner_image && (
                   <div className="mt-3">
                     <p className="text-sm text-gray-600 mb-2">Banner Preview:</p>
@@ -494,7 +446,7 @@ const PromotionRequestPage = () => {
                 </select>
               </div>
 
-              {/* Info Box */}
+              {/* ✅ UPDATED: Removed commission info from guidelines */}
               <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -505,7 +457,6 @@ const PromotionRequestPage = () => {
                     <ul className="text-sm text-blue-800 space-y-1">
                       <li>• Your promotion banner request will be reviewed by an administrator</li>
                       <li>• Approved promotions will appear as pop-up advertisements to buyers</li>
-                      <li>• Commission increase is mandatory for platform promotion</li>
                       <li>• Ensure your product has sufficient stock for the promotion period</li>
                       <li>• Upload an eye-catching banner image for better engagement</li>
                     </ul>
