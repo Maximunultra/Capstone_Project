@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Truck, Upload, X, Image as ImageIcon } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
 const ProductEditPage = () => {
   const { id } = useParams();
