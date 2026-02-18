@@ -5,7 +5,7 @@ import { supabase } from "../server.js";
 
 const router = express.Router();
 
-// Enhanced login route with debugging
+// Enhanced login route with debugging and seller approval check
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -48,6 +48,42 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
+    // ✅ Check if seller is approved
+    if (user.role === 'seller' && user.approval_status !== 'approved') {
+      console.log("Seller not approved:", email, "Status:", user.approval_status);
+      
+      const statusMessages = {
+        pending: "Your seller account is pending approval. Please wait for admin verification.",
+        rejected: "Your seller account has been rejected. Please contact support for more information."
+      };
+      
+      return res.status(403).json({ 
+        error: statusMessages[user.approval_status] || "Your seller account is not approved yet."
+      });
+    }
+
+    // ✅ NEW: Check seller approval status
+    if (user.role === 'seller' && user.approval_status !== 'approved') {
+      console.log("Seller not approved:", email, "Status:", user.approval_status);
+      
+      if (user.approval_status === 'pending') {
+        return res.status(403).json({ 
+          error: "Your seller account is pending approval. Please wait for admin verification.",
+          status: "pending"
+        });
+      } else if (user.approval_status === 'rejected') {
+        return res.status(403).json({ 
+          error: "Your seller account application was rejected. Please contact support for more information.",
+          status: "rejected"
+        });
+      } else {
+        return res.status(403).json({ 
+          error: "Your seller account is not approved. Please contact support.",
+          status: user.approval_status
+        });
+      }
+    }
+
     // Generate JWT token
     const token = jwt.sign(
       { 
@@ -73,6 +109,7 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 // Register route (optional)
 router.post("/register", async (req, res) => {
   try {

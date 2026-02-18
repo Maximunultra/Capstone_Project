@@ -1,6 +1,6 @@
 // ============================================
 // FILE: routes/promotions.js
-// Complete Backend API for Promotion System
+// ✅ UPDATED: Removed commission_increase
 // ============================================
 
 import express from 'express';
@@ -20,8 +20,6 @@ router.post('/', async (req, res) => {
       promotion_type,
       promotion_title,
       promotion_description,
-      discount_percentage,
-      commission_increase,
       start_date,
       end_date,
       banner_image,
@@ -30,8 +28,8 @@ router.post('/', async (req, res) => {
 
     console.log('📥 Received promotion request:', req.body);
 
-    // Validation
-    if (!user_id || !product_id || !promotion_title || !commission_increase || !start_date || !end_date) {
+    // ✅ UPDATED: Removed commission_increase from validation
+    if (!user_id || !product_id || !promotion_title || !start_date || !end_date) {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
@@ -53,7 +51,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Insert promotion
+    // ✅ UPDATED: Removed commission_increase from insert
     const { data, error } = await supabase
       .from('promotions')
       .insert([{
@@ -62,8 +60,6 @@ router.post('/', async (req, res) => {
         promotion_type: promotion_type || 'discount',
         promotion_title,
         promotion_description: promotion_description || '',
-        discount_percentage: discount_percentage || 0,
-        commission_increase,
         start_date,
         end_date,
         banner_image: banner_image || null,
@@ -189,7 +185,7 @@ router.get('/active', async (req, res) => {
 
     console.log(`📊 Total approved promotions: ${data.length}`);
 
-    // Filter by date in JavaScript (more reliable)
+    // Filter by date in JavaScript
     const now = new Date();
     const activePromotions = data.filter(promo => {
       const startDate = new Date(promo.start_date);
@@ -262,7 +258,6 @@ router.patch('/:id/approve', async (req, res) => {
       });
     }
 
-    // Update promotion - status will always be 'approved'
     const { data, error } = await supabase
       .from('promotions')
       .update({ 
