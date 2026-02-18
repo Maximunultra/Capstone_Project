@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Package, CheckCircle, ShoppingBag, Mail } from 'lucide-react';
+import { Package, CheckCircle, ShoppingBag, Mail, Info } from 'lucide-react';
 import OrdersPage from './OrdersPage';
 import MessagesTab from './MessagesTab';
 
@@ -16,6 +16,9 @@ const CartPage = ({ userId }) => {
   const [error, setError] = useState(null);
   const [updatingItems, setUpdatingItems] = useState(new Set());
   const [hasChanges, setHasChanges] = useState(false);
+
+  // ✅ SHIPPING FEE CONSTANTS (matching CheckoutPage logic)
+  const FIXED_SHIPPING_FEE_3PLUS = 100; // ₱100 FIXED flat fee for 3+ products
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
@@ -134,13 +137,62 @@ const CartPage = ({ userId }) => {
     return (getItemPrice(item) * item.quantity).toFixed(2);
   };
 
-  const getSubtotal = () => {
-    return cartItems.reduce((sum, item) => sum + (getItemPrice(item) * item.quantity), 0).toFixed(2);
+  // ─────────────────────────────────────────────────────────
+  // ✅ SHIPPING FEE CALCULATION (matching CheckoutPage)
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Get total quantity of products in cart
+   */
+  const getTotalProducts = () =>
+    cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  /**
+   * Calculate raw shipping (sum of individual fees)
+   */
+  const getRawShipping = () =>
+    cartItems.reduce((sum, item) => {
+      const fee = parseFloat(item.product?.shipping_fee || 50);
+      return sum + fee * item.quantity;
+    }, 0);
+
+  /**
+   * ✅ NEW Shipping fee logic:
+   * - 1 product   → individual shipping fee × qty
+   * - 2 products  → sum of each product's individual shipping fee
+   * - 3+ products → FIXED ₱100 flat fee
+   */
+  const getShippingFee = () => {
+    const totalQty = getTotalProducts();
+
+    if (totalQty >= 3) {
+      // 3+ products: fixed ₱100 flat fee
+      return FIXED_SHIPPING_FEE_3PLUS;
+    }
+
+    // 1–2 products: sum of individual shipping fees
+    return getRawShipping();
   };
 
-  const getShippingFee = () => {
-    const subtotal = parseFloat(getSubtotal());
-    return subtotal >= 1000 ? 0 : 99;
+  /**
+   * Returns true when fixed ₱100 fee is applied (3+ products)
+   */
+  const isFixedShippingApplied = () => getTotalProducts() >= 3;
+
+  /**
+   * How much the customer SAVES vs paying individual fees (3+ items only)
+   */
+  const getShippingSavings = () => {
+    if (!isFixedShippingApplied()) return 0;
+    const raw = getRawShipping();
+    const savings = raw - FIXED_SHIPPING_FEE_3PLUS;
+    return savings > 0 ? savings : 0;
+  };
+
+  // ─────────────────────────────────────────────────────────
+
+  const getSubtotal = () => {
+    return cartItems.reduce((sum, item) => sum + (getItemPrice(item) * item.quantity), 0).toFixed(2);
   };
 
   const getTotal = () => {
@@ -167,9 +219,16 @@ const CartPage = ({ userId }) => {
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
-    // Update URL without page reload
     navigate(`/buyer/cart?tab=${tab}`, { replace: true });
   };
+
+  // ─────────────────────────────────────────────────────────
+  // DERIVED VALUES
+  // ─────────────────────────────────────────────────────────
+  const totalProducts = getTotalProducts();
+  const rawShipping   = getRawShipping();
+  const fixedApplied  = isFixedShippingApplied();
+  const savings       = getShippingSavings();
 
   if (loading && cartItems.length === 0 && activeTab === 'cart') {
     return (
@@ -419,20 +478,49 @@ const CartPage = ({ userId }) => {
                           <span className="font-bold text-gray-900">₱{getSubtotal()}</span>
                         </div>
                         
+                        {/* ✅ NEW Shipping Fee display with breakdown */}
                         <div className="flex justify-between text-gray-600">
-                          <span>Shipping Fee</span>
-                          <span className="font-bold text-gray-900">
-                            {getShippingFee() === 0 ? (
-                              <span className="text-emerald-600">FREE</span>
-                            ) : (
-                              `₱${getShippingFee().toFixed(2)}`
+                          <div className="flex flex-col">
+                            <span>Shipping Fee</span>
+                            {totalProducts === 2 && (
+                              <span className="text-xs text-blue-600 mt-0.5">Sum of individual fees</span>
                             )}
+                            {fixedApplied && (
+                              <span className="text-xs text-green-600 font-medium mt-0.5">
+                                Fixed flat fee (3+ items)
+                                {savings > 0 && ` · save ₱${savings.toFixed(2)}`}
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-bold text-gray-900">
+                            ₱{getShippingFee().toFixed(2)}
                           </span>
                         </div>
-                        
-                        {parseFloat(getSubtotal()) < 1000 && parseFloat(getSubtotal()) > 0 && (
-                          <div className="text-sm text-blue-600 bg-blue-50 p-4 rounded-xl border border-blue-200 font-medium">
-                            Add ₱{(1000 - parseFloat(getSubtotal())).toFixed(2)} more for free shipping! 🚚
+
+                        {/* ✅ Shipping Policy Info Box */}
+                        {totalProducts === 1 && (
+                          <div className="text-xs bg-gray-50 border border-gray-200 p-3 rounded-lg text-gray-600">
+                            <p className="font-medium text-gray-800 mb-1">📦 Shipping</p>
+                            <p>Individual product shipping fee applies</p>
+                          </div>
+                        )}
+
+                        {totalProducts === 2 && (
+                          <div className="text-xs bg-blue-50 border border-blue-200 p-3 rounded-lg text-blue-700">
+                            <p className="font-medium text-blue-800 mb-1">📦 Combined Shipping</p>
+                            <p>Sum of each product's individual fee</p>
+                          </div>
+                        )}
+
+                        {fixedApplied && (
+                          <div className="text-xs bg-green-50 border border-green-200 p-3 rounded-lg text-green-700">
+                            <div className="flex items-start gap-2">
+                              <span className="text-sm">✓</span>
+                              <div>
+                                <p className="font-medium text-green-800 mb-1">Fixed ₱{FIXED_SHIPPING_FEE_3PLUS} Shipping</p>
+                                <p>Flat fee for 3+ products{savings > 0 && ` — you save ₱${savings.toFixed(2)}!`}</p>
+                              </div>
+                            </div>
                           </div>
                         )}
 
@@ -463,21 +551,20 @@ const CartPage = ({ userId }) => {
                         </p>
                       )}
 
-                      {/* Free Shipping Info */}
+                      {/* Additional Info */}
                       <div className="mt-6 pt-6 border-t border-gray-200 space-y-4">
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center flex-shrink-0">
                             <CheckCircle className="w-5 h-5 text-emerald-600" />
                           </div>
                           <div>
-                            <h3 className="font-bold text-gray-900 mb-1">Shipping</h3>
+                            <h3 className="font-bold text-gray-900 mb-1">Final Shipping</h3>
                             <p className="text-sm text-gray-600">
-                              Your Shipping will be calculated at checkout
+                              Calculated at checkout based on your delivery location
                             </p>
                           </div>
                         </div>
 
-                        {/* Secure Checkout */}
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center flex-shrink-0">
                             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

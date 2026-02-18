@@ -145,6 +145,83 @@ const CheckoutPage = ({ userId }) => {
   };
 
   // ─────────────────────────────────────────────
+  // DELIVERY ESTIMATE HELPER
+  // ─────────────────────────────────────────────
+
+  /**
+   * Returns delivery estimate info based on city.
+   * - "legazpi" (any case/spacing) → Today or Tomorrow
+   * - anywhere else               → 3–4 days from order date
+   *
+   * @param {string} city        - city from shipping form
+   * @param {string|Date} fromDate - order date (defaults to now)
+   */
+  const getDeliveryEstimate = (city = '', fromDate = new Date()) => {
+    const isLegazpi = city.trim().toLowerCase().replace(/\s+/g, '') === 'legazpicity' ||
+                      city.trim().toLowerCase() === 'legazpi';
+
+    const base = new Date(fromDate);
+
+    const fmt = (d) => d.toLocaleDateString('en-PH', {
+      weekday: 'short', month: 'short', day: 'numeric'
+    });
+
+    if (isLegazpi) {
+      const today    = new Date(base);
+      const tomorrow = new Date(base);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return {
+        label: 'Today or Tomorrow',
+        range: `${fmt(today)} – ${fmt(tomorrow)}`,
+        isLocal: true,
+        days: '0–1 day'
+      };
+    } else {
+      const min = new Date(base);
+      const max = new Date(base);
+      min.setDate(min.getDate() + 3);
+      max.setDate(max.getDate() + 4);
+      return {
+        label: '3–4 Business Days',
+        range: `${fmt(min)} – ${fmt(max)}`,
+        isLocal: false,
+        days: '3–4 days'
+      };
+    }
+  };
+
+  /**
+   * Reusable delivery estimate banner component (inline JSX helper)
+   * isLocal = green (Legazpi), outside = blue
+   */
+  const DeliveryBanner = ({ city, orderDate }) => {
+    if (!city) return null;
+    const est = getDeliveryEstimate(city, orderDate);
+    return (
+      <div className={`rounded-lg p-4 border flex gap-3 ${
+        est.isLocal
+          ? 'bg-green-50 border-green-200'
+          : 'bg-blue-50 border-blue-200'
+      }`}>
+        <span className="text-xl flex-shrink-0">{est.isLocal ? '🏠' : '🚚'}</span>
+        <div>
+          <p className={`text-sm font-semibold ${est.isLocal ? 'text-green-800' : 'text-blue-800'}`}>
+            Estimated Delivery: {est.label}
+          </p>
+          <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-700' : 'text-blue-700'}`}>
+            Expected: {est.range}
+          </p>
+          <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-600' : 'text-blue-600'}`}>
+            {est.isLocal
+              ? '📍 Within Legazpi City — same/next day delivery'
+              : '📦 Outside Legazpi City — standard delivery'}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────
   // STEP NAVIGATION WITH VALIDATION
   // ─────────────────────────────────────────────
 
@@ -587,6 +664,21 @@ const CheckoutPage = ({ userId }) => {
                     </div>
                   </div>
                 </div>
+
+                {/* ✅ Live Delivery Estimate — updates as city is typed */}
+                {shippingInfo.city && (
+                  <div className="mt-5 pt-5 border-t border-gray-200">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                      📦 Delivery Estimate
+                    </p>
+                    <DeliveryBanner city={shippingInfo.city} />
+                  </div>
+                )}
+                {!shippingInfo.city && (
+                  <div className="mt-5 pt-5 border-t border-gray-200 text-center text-xs text-gray-400">
+                    Enter your city above to see delivery estimate
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -751,6 +843,14 @@ const CheckoutPage = ({ userId }) => {
                       <span className="text-2xl font-bold text-green-600">₱{calculateTotal()}</span>
                     </div>
                   </div>
+
+                  {/* ✅ Delivery Estimate in Step 2 sidebar */}
+                  <div className="border-t border-gray-200 pt-3 mt-1">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      📦 Estimated Delivery
+                    </p>
+                    <DeliveryBanner city={shippingInfo.city} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -805,6 +905,11 @@ const CheckoutPage = ({ userId }) => {
                 </div>
               </div>
             )}
+
+            {/* ✅ Delivery Estimate Banner — Step 3 */}
+            <div className="mb-6">
+              <DeliveryBanner city={shippingInfo.city} />
+            </div>
 
             <div className="space-y-4 mb-8">
               <button onClick={() => setPaymentMethod('gcash')} disabled={!meetsMinPayment} className={`w-full p-6 rounded-lg border-2 transition-all ${!meetsMinPayment ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed' : paymentMethod === 'gcash' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
@@ -943,6 +1048,12 @@ const CheckoutPage = ({ userId }) => {
                 <p className="font-medium text-gray-900">{shippingInfo.fullName}</p>
                 <p className="text-sm text-gray-600">{shippingInfo.address}</p>
                 <p className="text-sm text-gray-600">{shippingInfo.city}, {shippingInfo.province}</p>
+              </div>
+
+              {/* ✅ Delivery Estimate — Step 4 Confirmation */}
+              <div className="border-t border-gray-200 pt-4 mb-4">
+                <p className="text-sm font-semibold text-gray-700 mb-2">📦 Estimated Delivery</p>
+                <DeliveryBanner city={shippingInfo.city} orderDate={new Date()} />
               </div>
 
               <div className="border-t border-gray-200 pt-4">

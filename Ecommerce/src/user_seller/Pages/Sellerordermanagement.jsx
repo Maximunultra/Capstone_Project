@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign, ShoppingBag } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign, ShoppingBag, MessageCircle, Send } from 'lucide-react';
 
 // API Base URL - Update this to your actual API endpoint
 // const API_BASE_URL = 'http://localhost:5000/api';
@@ -16,6 +16,13 @@ const SellerOrderManagement = () => {
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // ✅ NEW: Message/Note Modal States
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [messageType, setMessageType] = useState('update'); // 'update', 'delay', 'delivery'
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState('');
+
   // Get current user info
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentUserId = currentUser.id;
@@ -31,11 +38,9 @@ const SellerOrderManagement = () => {
       setLoading(true);
       console.log('🔍 Fetching orders for user:', currentUserId, 'Role:', currentUserRole);
 
-      // Build query params
       let url = `${API_BASE_URL}/orders`;
       const params = new URLSearchParams();
       
-      // If seller, add seller_id filter
       if (currentUserRole === 'seller' && currentUserId) {
         params.append('seller_id', currentUserId);
       }
@@ -71,7 +76,6 @@ const SellerOrderManagement = () => {
   const handleUpdateStatus = async () => {
     if (!selectedOrder || !selectedStatus) return;
     
-    // Prevent changing status if already delivered
     if (selectedOrder.order_status === 'delivered') {
       alert('Cannot change status of delivered orders');
       return;
@@ -104,7 +108,6 @@ const SellerOrderManagement = () => {
   const handleUpdatePaymentStatus = async () => {
     if (!selectedOrder || !selectedPaymentStatus) return;
     
-    // Only allow payment status update for COD orders
     if (selectedOrder.payment_method !== 'cod') {
       alert('Payment status can only be modified for COD orders');
       return;
@@ -160,6 +163,77 @@ const SellerOrderManagement = () => {
     }
   };
 
+  // ✅ NEW: Open Message Modal
+  const handleOpenMessageModal = () => {
+    setShowMessageModal(true);
+    setMessageText('');
+    setMessageType('update');
+    setMessageError('');
+  };
+
+  // ✅ NEW: Send Message to Buyer
+  const handleSendMessage = async () => {
+    setMessageError('');
+    
+    if (!messageText.trim()) {
+      setMessageError('Please enter a message');
+      return;
+    }
+
+    // Get buyer's user_id from the order - it might be in different fields depending on API response
+    const buyerId = selectedOrder.user_id || selectedOrder.buyer_id || selectedOrder.customer_id;
+    
+    if (!buyerId) {
+      setMessageError('Buyer information not available. Please contact support.');
+      console.error('Missing buyer ID in order:', selectedOrder);
+      return;
+    }
+
+    setSendingMessage(true);
+    try {
+      const messageData = {
+        sender_id: currentUserId,
+        receiver_id: buyerId,
+        message: messageText.trim(),
+        order_id: parseInt(selectedOrder.id), // ✅ Include order_id (backend validation updated)
+        product_id: selectedOrder.order_items?.[0]?.product_id || null
+      };
+      
+      console.log('📨 Sending message:', messageData);
+
+      const response = await fetch(`${API_BASE_URL}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messageData)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send message');
+      }
+
+      alert('✅ Message sent to buyer successfully!');
+      setShowMessageModal(false);
+      setMessageText('');
+    } catch (err) {
+      setMessageError(err.message);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // ✅ NEW: Quick message templates
+  const getMessageTemplate = (type) => {
+    const templates = {
+      update: `Hello! This is an update regarding your order #${selectedOrder?.order_number || ''}.\n\n`,
+      delay: `Dear Customer,\n\nWe regret to inform you that your order #${selectedOrder?.order_number || ''} will experience a slight delay due to unforeseen circumstances (e.g., bad weather, supply issues).\n\nWe apologize for any inconvenience and will keep you updated.\n\nThank you for your patience!`,
+      delivery: `Good news! Your order #${selectedOrder?.order_number || ''} is scheduled for delivery today.\n\nPlease ensure someone is available to receive the package.\n\nThank you for your business!`,
+      weather: `Dear Customer,\n\nDue to severe weather conditions in your area, the delivery of order #${selectedOrder?.order_number || ''} has been delayed for safety reasons.\n\nWe expect to resume delivery as soon as conditions improve.\n\nThank you for your understanding!`
+    };
+    return templates[type] || '';
+  };
+
   const openOrderDetails = (order) => {
     setSelectedOrder(order);
     setSelectedStatus(order.order_status);
@@ -205,7 +279,6 @@ const SellerOrderManagement = () => {
     return `₱${parseFloat(amount).toFixed(2)}`;
   };
 
-  // Calculate total items in order
   const getTotalItems = (orderItems) => {
     if (!orderItems || orderItems.length === 0) return 0;
     return orderItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
@@ -227,7 +300,6 @@ const SellerOrderManagement = () => {
             </p>
           </div>
 
-          {/* Role Badge */}
           {currentUserRole === 'admin' && (
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-6 py-3">
               <p className="text-sm text-blue-800 font-medium">
@@ -355,7 +427,7 @@ const SellerOrderManagement = () => {
                                 : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white'
                             }`}
                           >
-                            {currentUserRole === 'admin' ? 'View Details' : 'Update'}
+                            {currentUserRole === 'admin' ? 'View Details' : 'Manage'}
                           </button>
                         </td>
                       </tr>
@@ -398,6 +470,22 @@ const SellerOrderManagement = () => {
 
             {/* Modal Body */}
             <div className="p-8 space-y-6">
+              {/* ✅ NEW: Message Buyer Button (Seller Only) */}
+              {currentUserRole === 'seller' && (
+                <div>
+                  <button
+                    onClick={handleOpenMessageModal}
+                    className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-4 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-3"
+                  >
+                    <MessageCircle size={20} />
+                    Send Message to Buyer
+                  </button>
+                  <p className="text-xs text-gray-500 text-center mt-2">
+                    Notify buyer about delays, delivery updates, or other order information
+                  </p>
+                </div>
+              )}
+
               {/* Order Items Section */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -409,7 +497,6 @@ const SellerOrderManagement = () => {
                     <div className="divide-y divide-amber-200">
                       {selectedOrder.order_items.map((item, index) => (
                         <div key={index} className="p-4 flex gap-4 hover:bg-white/50 transition-colors">
-                          {/* Product Image */}
                           <div className="flex-shrink-0">
                             {item.product_image ? (
                               <img
@@ -424,7 +511,6 @@ const SellerOrderManagement = () => {
                             )}
                           </div>
 
-                          {/* Product Details */}
                           <div className="flex-1 min-w-0">
                             <h4 className="font-bold text-gray-900 mb-1 truncate">
                               {item.product_name}
@@ -453,7 +539,6 @@ const SellerOrderManagement = () => {
                             </div>
                           </div>
 
-                          {/* Item Subtotal */}
                           <div className="flex-shrink-0 text-right">
                             <p className="text-xs text-gray-500 mb-1">Subtotal</p>
                             <p className="text-lg font-bold text-gray-900">
@@ -498,7 +583,6 @@ const SellerOrderManagement = () => {
                   Order Status
                 </h3>
                 {currentUserRole === 'admin' ? (
-                  // ADMIN: View only
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Current Status</p>
@@ -513,7 +597,6 @@ const SellerOrderManagement = () => {
                     </div>
                   </div>
                 ) : selectedOrder.order_status === 'delivered' ? (
-                  // SELLER: Delivered orders cannot be changed
                   <div className="bg-gradient-to-r from-emerald-50 to-green-50 p-5 rounded-xl flex items-center justify-between">
                     <span className="font-medium text-gray-900">
                       Delivered (Cannot be changed)
@@ -524,7 +607,6 @@ const SellerOrderManagement = () => {
                     </span>
                   </div>
                 ) : (
-                  // SELLER: Can update status
                   <>
                     <select
                       value={selectedStatus}
@@ -557,7 +639,6 @@ const SellerOrderManagement = () => {
                     Payment Status (COD)
                   </h3>
                   {currentUserRole === 'admin' ? (
-                    // ADMIN: View only
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Current Payment Status</p>
@@ -571,7 +652,6 @@ const SellerOrderManagement = () => {
                       </div>
                     </div>
                   ) : (
-                    // SELLER: Can update
                     <>
                       <select
                         value={selectedPaymentStatus}
@@ -602,7 +682,6 @@ const SellerOrderManagement = () => {
                   Tracking Number
                 </h3>
                 {currentUserRole === 'admin' ? (
-                  // ADMIN: View only
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Tracking Number</p>
@@ -616,7 +695,6 @@ const SellerOrderManagement = () => {
                     </div>
                   </div>
                 ) : editingTracking ? (
-                  // SELLER: Editing mode
                   <div>
                     <input
                       type="text"
@@ -646,7 +724,6 @@ const SellerOrderManagement = () => {
                     </div>
                   </div>
                 ) : (
-                  // SELLER: Display mode with edit button
                   <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl flex justify-between items-center">
                     <span className="font-medium text-gray-900">
                       {selectedOrder.tracking_number || 'No tracking number'}
@@ -673,7 +750,7 @@ const SellerOrderManagement = () => {
                     <span className="font-medium">{formatCurrency(selectedOrder.subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-gray-700">
-                    <span>Tax</span>
+                    <span>Platform Fee</span>
                     <span className="font-medium">{formatCurrency(selectedOrder.tax)}</span>
                   </div>
                   <div className="flex justify-between text-gray-700">
@@ -690,6 +767,142 @@ const SellerOrderManagement = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ NEW: Message Modal */}
+      {showMessageModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <MessageCircle className="w-6 h-6" />
+                <div>
+                  <h2 className="text-xl font-bold">Send Message to Buyer</h2>
+                  <p className="text-sm text-blue-100">Order #{selectedOrder.order_number}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowMessageModal(false);
+                  setMessageText('');
+                  setMessageError('');
+                }}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {/* Quick Templates */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Quick Templates
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setMessageText(getMessageTemplate('update'))}
+                    className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition border border-blue-200"
+                  >
+                    📝 General Update
+                  </button>
+                  <button
+                    onClick={() => setMessageText(getMessageTemplate('delay'))}
+                    className="px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg text-sm font-medium transition border border-orange-200"
+                  >
+                    ⏰ Delay Notice
+                  </button>
+                  <button
+                    onClick={() => setMessageText(getMessageTemplate('delivery'))}
+                    className="px-4 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-sm font-medium transition border border-green-200"
+                  >
+                    🚚 Delivery Today
+                  </button>
+                  <button
+                    onClick={() => setMessageText(getMessageTemplate('weather'))}
+                    className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-sm font-medium transition border border-purple-200"
+                  >
+                    🌧️ Weather Delay
+                  </button>
+                </div>
+              </div>
+
+              {/* Customer Info Preview */}
+              <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-sm text-gray-600 mb-2">Sending to:</p>
+                <div>
+                  <p className="font-semibold text-gray-900">{selectedOrder.shipping_full_name}</p>
+                  <p className="text-sm text-gray-600">{selectedOrder.shipping_email}</p>
+                </div>
+              </div>
+
+              {messageError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-700">{messageError}</p>
+                </div>
+              )}
+
+              {/* Message Input */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Your Message
+                </label>
+                <textarea
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder="Type your message to the buyer here... You can use the quick templates above or write your own custom message."
+                  className="w-full h-48 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none"
+                  disabled={sendingMessage}
+                  maxLength={1000}
+                />
+                <p className="text-sm text-gray-500 mt-2">
+                  {messageText.length} / 1000 characters
+                </p>
+              </div>
+
+              {/* Info Box */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>💡 Tip:</strong> Clear communication helps build trust with your customers. Keep them informed about any changes or updates to their order.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowMessageModal(false);
+                  setMessageText('');
+                  setMessageError('');
+                }}
+                disabled={sendingMessage}
+                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendMessage}
+                disabled={!messageText.trim() || sendingMessage}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
+              >
+                {sendingMessage ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    Send Message
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
