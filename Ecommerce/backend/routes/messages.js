@@ -99,6 +99,10 @@ router.post("/", async (req, res) => {
     }
 
     // If order_id is provided, verify the order exists and belongs to the sender
+   // ✅ FIXED: Line 40-77 in your messages.js
+// Replace the order validation section with this:
+
+    // If order_id is provided, verify the order exists and user has permission
     if (order_id) {
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
@@ -112,14 +116,13 @@ router.post("/", async (req, res) => {
           )
         `)
         .eq("id", order_id)
-        .eq("user_id", sender_id)
         .single();
       
       if (orderError) {
         console.error('❌ Order fetch error:', orderError);
         return res.status(404).json({
           success: false,
-          error: 'Order not found or does not belong to you',
+          error: 'Order not found',
           details: orderError.message
         });
       }
@@ -131,23 +134,33 @@ router.post("/", async (req, res) => {
         });
       }
 
-      // Verify the receiver is actually the seller (product owner)
+      // ✅ FIXED VALIDATION: Allow both buyer (order owner) and sellers (product owners) to message
       const sellerIds = orderData.order_items
         .map(item => item.product?.user_id)
         .filter(id => id !== null);
       
-      console.log('Seller IDs from products:', sellerIds);
-      console.log('Receiver ID:', receiver_id);
+      const isBuyer = orderData.user_id === sender_id;
+      const isSeller = sellerIds.includes(sender_id);
       
-      if (!sellerIds.includes(receiver_id)) {
+      if (!isBuyer && !isSeller) {
         return res.status(403).json({
           success: false,
-          error: 'Invalid receiver for this order',
-          details: `Receiver ${receiver_id} is not the seller of any products in this order`
+          error: 'You do not have permission to send messages about this order'
         });
       }
 
-      // Check if order status allows messaging (includes delivered now)
+      // ✅ Verify receiver is either the buyer or one of the sellers
+      const isReceiverBuyer = orderData.user_id === receiver_id;
+      const isReceiverSeller = sellerIds.includes(receiver_id);
+      
+      if (!isReceiverBuyer && !isReceiverSeller) {
+        return res.status(403).json({
+          success: false,
+          error: 'Invalid receiver for this order'
+        });
+      }
+
+      // Check if order status allows messaging
       const allowedStatuses = ['pending', 'processing', 'shipped', 'delivered'];
       if (!allowedStatuses.includes(orderData.order_status)) {
         return res.status(400).json({
@@ -156,7 +169,6 @@ router.post("/", async (req, res) => {
         });
       }
     }
-
     // 🔐 ENCRYPT THE MESSAGE
     const encryptedMessage = encryptMessage(message);
     console.log('🔒 Encrypted message:', encryptedMessage);
