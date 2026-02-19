@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Package, CheckCircle, ShoppingBag, Mail, Info } from 'lucide-react';
+import { Package, CheckCircle, ShoppingBag, Mail, Store, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import OrdersPage from './OrdersPage';
 import MessagesTab from './MessagesTab';
 
@@ -14,15 +14,19 @@ const CartPage = ({ userId }) => {
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [updatingItems, setUpdatingItems] = useState(new Set());
   const [hasChanges, setHasChanges] = useState(false);
 
-  // ✅ SHIPPING FEE CONSTANTS (matching CheckoutPage logic)
-  const FIXED_SHIPPING_FEE_3PLUS = 100; // ₱100 FIXED flat fee for 3+ products
+  // Which seller's group is selected for checkout (seller_id string or null)
+  const [selectedSellerId, setSelectedSellerId] = useState(null);
+
+  // Track collapsed state per seller group
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+
+  const FIXED_SHIPPING_FEE_3PLUS = 100;
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
-  // Check URL parameters for tab
+  // ─── Tab from URL ───────────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
@@ -32,15 +36,11 @@ const CartPage = ({ userId }) => {
   }, [location.search]);
 
   useEffect(() => {
-    if (!currentUserId) {
-      navigate('/login');
-      return;
-    }
-    if (activeTab === 'cart') {
-      fetchCartItems();
-    }
+    if (!currentUserId) { navigate('/login'); return; }
+    if (activeTab === 'cart') fetchCartItems();
   }, [currentUserId, activeTab]);
 
+  // ─── Fetch ──────────────────────────────────────────────────────
   const fetchCartItems = async () => {
     setLoading(true);
     setError(null);
@@ -50,6 +50,7 @@ const CartPage = ({ userId }) => {
       const data = await response.json();
       setCartItems(data.cart_items || []);
       setHasChanges(false);
+      setSelectedSellerId(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -57,19 +58,37 @@ const CartPage = ({ userId }) => {
     }
   };
 
+  // ─── Group cart items by seller ─────────────────────────────────
+  /**
+   * Returns an array of seller groups:
+   * [{ sellerId, sellerName, items: [...] }, ...]
+   */
+  const getSellerGroups = () => {
+    const groups = {};
+    cartItems.forEach(item => {
+      const sellerId = item.product?.user_id || 'unknown';
+      const sellerName = item.product?.seller_name || item.product?.brand || `Seller ${sellerId.slice(0, 6)}`;
+      if (!groups[sellerId]) {
+        groups[sellerId] = { sellerId, sellerName, items: [] };
+      }
+      groups[sellerId].items.push(item);
+    });
+    return Object.values(groups);
+  };
+
+  const sellerGroups = getSellerGroups();
+  const hasMultipleSellers = sellerGroups.length > 1;
+
+  // ─── Quantity helpers ───────────────────────────────────────────
   const updateQuantityLocal = (cartItemId, newQuantity) => {
     if (newQuantity < 1) return;
-    
-    const item = cartItems.find(item => item.id === cartItemId);
+    const item = cartItems.find(i => i.id === cartItemId);
     if (item && newQuantity > item.product.stock_quantity) {
       alert(`Only ${item.product.stock_quantity} items available in stock`);
       return;
     }
-    
-    setCartItems(prevItems =>
-      prevItems.map(item =>
-        item.id === cartItemId ? { ...item, quantity: newQuantity } : item
-      )
+    setCartItems(prev =>
+      prev.map(i => i.id === cartItemId ? { ...i, quantity: newQuantity } : i)
     );
     setHasChanges(true);
   };
@@ -77,15 +96,15 @@ const CartPage = ({ userId }) => {
   const updateCartOnServer = async () => {
     setLoading(true);
     try {
-      const updatePromises = cartItems.map(item =>
-        fetch(`${API_BASE_URL}/cart/${item.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quantity: item.quantity })
-        })
+      await Promise.all(
+        cartItems.map(item =>
+          fetch(`${API_BASE_URL}/cart/${item.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quantity: item.quantity })
+          })
+        )
       );
-      
-      await Promise.all(updatePromises);
       setHasChanges(false);
       alert('Cart updated successfully!');
       await fetchCartItems();
@@ -97,124 +116,87 @@ const CartPage = ({ userId }) => {
   };
 
   const removeFromCart = async (cartItemId) => {
-    if (!window.confirm('Are you sure you want to remove this item from your cart?')) {
-      return;
-    }
-
+    if (!window.confirm('Remove this item from your cart?')) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/cart/${cartItemId}`, {
-        method: 'DELETE'
-      });
-      
+      const response = await fetch(`${API_BASE_URL}/cart/${cartItemId}`, { method: 'DELETE' });
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to remove item');
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to remove item');
       }
-      
-      setCartItems(prevItems => prevItems.filter(item => item.id !== cartItemId));
-      alert('Item removed from cart');
+      setCartItems(prev => prev.filter(i => i.id !== cartItemId));
+      // Clear selected seller if their group is now empty
+      const remaining = cartItems.filter(i => i.id !== cartItemId);
+      const groups = {};
+      remaining.forEach(i => { groups[i.product?.user_id] = true; });
+      if (selectedSellerId && !groups[selectedSellerId]) setSelectedSellerId(null);
     } catch (err) {
       alert('Error removing item: ' + err.message);
     }
   };
 
+  // ─── Price helpers ───────────────────────────────────────────────
   const getItemPrice = (item) => {
-    if (item.price) {
-      return parseFloat(item.price);
-    }
-    
+    if (item.price) return parseFloat(item.price);
     if (item.product) {
       let price = item.product.price;
-      if (item.product.discount_percentage > 0) {
+      if (item.product.discount_percentage > 0)
         price = price - (price * item.product.discount_percentage / 100);
-      }
       return parseFloat(price);
     }
     return 0;
   };
 
-  const getItemTotal = (item) => {
-    return (getItemPrice(item) * item.quantity).toFixed(2);
-  };
+  const getItemTotal = (item) => (getItemPrice(item) * item.quantity).toFixed(2);
 
-  // ─────────────────────────────────────────────────────────
-  // ✅ SHIPPING FEE CALCULATION (matching CheckoutPage)
-  // ─────────────────────────────────────────────────────────
+  // ─── Shipping fee for a group of items ──────────────────────────
+  const getGroupTotalQty = (items) => items.reduce((s, i) => s + i.quantity, 0);
 
-  /**
-   * Get total quantity of products in cart
-   */
-  const getTotalProducts = () =>
-    cartItems.reduce((sum, item) => sum + item.quantity, 0);
-
-  /**
-   * Calculate raw shipping (sum of individual fees)
-   */
-  const getRawShipping = () =>
-    cartItems.reduce((sum, item) => {
-      const fee = parseFloat(item.product?.shipping_fee || 50);
-      return sum + fee * item.quantity;
+  const getGroupRawShipping = (items) =>
+    items.reduce((s, i) => {
+      const fee = parseFloat(i.product?.shipping_fee || 50);
+      return s + fee * i.quantity;
     }, 0);
 
-  /**
-   * ✅ NEW Shipping fee logic:
-   * - 1 product   → individual shipping fee × qty
-   * - 2 products  → sum of each product's individual shipping fee
-   * - 3+ products → FIXED ₱100 flat fee
-   */
-  const getShippingFee = () => {
-    const totalQty = getTotalProducts();
-
-    if (totalQty >= 3) {
-      // 3+ products: fixed ₱100 flat fee
-      return FIXED_SHIPPING_FEE_3PLUS;
-    }
-
-    // 1–2 products: sum of individual shipping fees
-    return getRawShipping();
+  const getGroupShippingFee = (items) => {
+    const qty = getGroupTotalQty(items);
+    return qty >= 3 ? FIXED_SHIPPING_FEE_3PLUS : getGroupRawShipping(items);
   };
 
-  /**
-   * Returns true when fixed ₱100 fee is applied (3+ products)
-   */
-  const isFixedShippingApplied = () => getTotalProducts() >= 3;
+  const getGroupSubtotal = (items) =>
+    items.reduce((s, i) => s + getItemPrice(i) * i.quantity, 0);
 
-  /**
-   * How much the customer SAVES vs paying individual fees (3+ items only)
-   */
-  const getShippingSavings = () => {
-    if (!isFixedShippingApplied()) return 0;
-    const raw = getRawShipping();
-    const savings = raw - FIXED_SHIPPING_FEE_3PLUS;
-    return savings > 0 ? savings : 0;
-  };
+  const getGroupTotal = (items) =>
+    getGroupSubtotal(items) + getGroupShippingFee(items);
 
-  // ─────────────────────────────────────────────────────────
+  // ─── Selected group helpers ──────────────────────────────────────
+  const selectedGroup = sellerGroups.find(g => g.sellerId === selectedSellerId) || null;
+  const selectedItems = selectedGroup?.items || [];
 
-  const getSubtotal = () => {
-    return cartItems.reduce((sum, item) => sum + (getItemPrice(item) * item.quantity), 0).toFixed(2);
-  };
+  const getSelectedSubtotal = () => getGroupSubtotal(selectedItems).toFixed(2);
+  const getSelectedShipping = () => getGroupShippingFee(selectedItems).toFixed(2);
+  const getSelectedTotal = () => getGroupTotal(selectedItems).toFixed(2);
+  const selectedFixedApplied = getGroupTotalQty(selectedItems) >= 3;
+  const selectedSavings = selectedFixedApplied
+    ? Math.max(0, getGroupRawShipping(selectedItems) - FIXED_SHIPPING_FEE_3PLUS)
+    : 0;
 
-  const getTotal = () => {
-    const subtotal = parseFloat(getSubtotal());
-    const shipping = getShippingFee();
-    return (subtotal + shipping).toFixed(2);
-  };
-
+  // ─── Checkout ───────────────────────────────────────────────────
   const handleCheckout = () => {
-    if (cartItems.length === 0) {
-      alert('Your cart is empty');
-      return;
-    }
-    if (hasChanges) {
-      alert('Please update your cart before proceeding to checkout');
-      return;
-    }
-    navigate('/buyer/checkout');
-  };
+    if (cartItems.length === 0) { alert('Your cart is empty'); return; }
 
-  const handleContinueShopping = () => {
-    navigate('/buyer/products');
+    if (hasMultipleSellers && !selectedSellerId) {
+      alert('You have products from multiple sellers.\nPlease select one seller group to checkout.');
+      return;
+    }
+
+    if (hasChanges) {
+      alert('Please update your cart before proceeding to checkout.');
+      return;
+    }
+
+    // Pass selected seller's items to checkout via location state
+    const itemsToCheckout = hasMultipleSellers ? selectedItems : cartItems;
+    navigate('/buyer/checkout', { state: { checkoutItems: itemsToCheckout, sellerId: selectedSellerId } });
   };
 
   const handleTabChange = (tab) => {
@@ -222,14 +204,108 @@ const CartPage = ({ userId }) => {
     navigate(`/buyer/cart?tab=${tab}`, { replace: true });
   };
 
-  // ─────────────────────────────────────────────────────────
-  // DERIVED VALUES
-  // ─────────────────────────────────────────────────────────
-  const totalProducts = getTotalProducts();
-  const rawShipping   = getRawShipping();
-  const fixedApplied  = isFixedShippingApplied();
-  const savings       = getShippingSavings();
+  const toggleGroup = (sellerId) => {
+    setCollapsedGroups(prev => ({ ...prev, [sellerId]: !prev[sellerId] }));
+  };
 
+  // ─── Render helpers ──────────────────────────────────────────────
+  const renderCartItem = (item) => (
+    <div key={item.id} className="p-6 hover:bg-gray-50/50 transition group">
+      <div className="flex gap-4">
+        {/* Image */}
+        <div
+          className="w-24 h-24 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 cursor-pointer border-2 border-transparent group-hover:border-blue-200 transition"
+          onClick={() => navigate(`/buyer/products/${item.product_id}`)}
+        >
+          {item.product?.product_image ? (
+            <img
+              src={item.product.product_image}
+              alt={item.product?.product_name}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-300">
+              <Package className="w-10 h-10" />
+            </div>
+          )}
+        </div>
+
+        {/* Details */}
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-start mb-2">
+            <div className="flex-1 min-w-0 pr-4">
+              <h3
+                className="font-bold text-gray-900 mb-1 cursor-pointer hover:text-blue-600 transition truncate"
+                onClick={() => navigate(`/buyer/products/${item.product_id}`)}
+              >
+                {item.product?.product_name}
+              </h3>
+              {item.product?.brand && (
+                <p className="text-sm text-gray-500">{item.product.brand}</p>
+              )}
+              {item.product?.category && (
+                <p className="text-sm text-gray-400">{item.product.category}</p>
+              )}
+            </div>
+            <button
+              onClick={() => removeFromCart(item.id)}
+              className="text-gray-400 hover:text-red-500 transition flex-shrink-0"
+              title="Remove from cart"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between mt-3">
+            {/* Price */}
+            <div>
+              {item.product?.discount_percentage > 0 ? (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-bold text-green-600">₱{getItemPrice(item).toFixed(2)}</span>
+                  <span className="text-sm text-gray-400 line-through">₱{item.product.price}</span>
+                </div>
+              ) : (
+                <span className="text-lg font-bold text-gray-900">₱{getItemPrice(item).toFixed(2)}</span>
+              )}
+            </div>
+
+            {/* Qty + total */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => updateQuantityLocal(item.id, item.quantity - 1)}
+                  disabled={item.quantity <= 1}
+                  className="w-8 h-8 flex items-center justify-center bg-white hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-700 rounded-lg font-bold transition shadow-sm"
+                >−</button>
+                <span className="w-8 text-center font-bold text-gray-900">{item.quantity}</span>
+                <button
+                  onClick={() => updateQuantityLocal(item.id, item.quantity + 1)}
+                  disabled={item.quantity >= item.product?.stock_quantity}
+                  className="w-8 h-8 flex items-center justify-center bg-white hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-700 rounded-lg font-bold transition shadow-sm"
+                >+</button>
+              </div>
+              <div className="text-right min-w-[80px]">
+                <p className="text-xs text-gray-500">Total</p>
+                <p className="text-base font-bold text-gray-900">₱{getItemTotal(item)}</p>
+              </div>
+            </div>
+          </div>
+
+          {item.product?.stock_quantity <= 10 && (
+            <div className="mt-2">
+              <span className="text-xs text-orange-600 bg-orange-50 px-3 py-1 rounded-full font-medium">
+                Only {item.product.stock_quantity} left in stock
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ─── Loading ─────────────────────────────────────────────────────
   if (loading && cartItems.length === 0 && activeTab === 'cart') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30 flex items-center justify-center">
@@ -244,6 +320,7 @@ const CartPage = ({ userId }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30 py-8 px-4">
       <div className="max-w-7xl mx-auto">
+
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2 tracking-tight">
@@ -278,12 +355,10 @@ const CartPage = ({ userId }) => {
                 {count !== undefined && count > 0 && (
                   <span className={`px-2 py-0.5 text-xs rounded-full font-bold ${
                     activeTab === id ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
-                  }`}>
-                    {count}
-                  </span>
+                  }`}>{count}</span>
                 )}
                 {activeTab === id && (
-                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600"></div>
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600" />
                 )}
               </button>
             ))}
@@ -292,11 +367,12 @@ const CartPage = ({ userId }) => {
 
         {/* Tab Content */}
         <div className="animate-fadeIn">
-          {/* Cart Tab */}
+
+          {/* ── CART TAB ── */}
           {activeTab === 'cart' && (
             <>
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 mt-4">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                   <p className="text-red-700">Error: {error}</p>
                 </div>
               )}
@@ -309,240 +385,262 @@ const CartPage = ({ userId }) => {
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">Your cart is empty</h2>
                   <p className="text-gray-600 mb-8">Start shopping and add items to your cart</p>
                   <button
-                    onClick={handleContinueShopping}
-                    className="bg-blue-600 text-white px-8 py-4 rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg hover:shadow-xl"
+                    onClick={() => navigate('/buyer/products')}
+                    className="bg-blue-600 text-white px-8 py-4 rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg"
                   >
                     Browse Products
                   </button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Cart Items */}
-                  <div className="lg:col-span-2">
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                      {/* Cart Items Header */}
-                      <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <h2 className="text-xl font-bold text-gray-900">Cart Items ({cartItems.length})</h2>
+
+                  {/* ── Left: Seller Groups ── */}
+                  <div className="lg:col-span-2 space-y-6">
+
+                    {/* Multi-seller notice */}
+                    {hasMultipleSellers && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 items-start">
+                        <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-amber-800">Products from multiple sellers detected</p>
+                          <p className="text-sm text-amber-700 mt-1">
+                            You can only checkout products from <strong>one seller at a time</strong>.
+                            Select a seller group below to proceed to checkout.
+                          </p>
+                        </div>
                       </div>
+                    )}
 
-                      {/* Items List */}
-                      <div className="divide-y divide-gray-100">
-                        {cartItems.map((item) => (
-                          <div key={item.id} className="p-6 hover:bg-gray-50/50 transition group">
-                            <div className="flex gap-4">
-                              {/* Product Image */}
-                              <div 
-                                className="w-24 h-24 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 cursor-pointer border-2 border-transparent group-hover:border-blue-200 transition"
-                                onClick={() => navigate(`/buyer/products/${item.product_id}`)}
-                              >
-                                {item.product?.product_image ? (
-                                  <img 
-                                    src={item.product.product_image} 
-                                    alt={item.product?.product_name} 
-                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                    <Package className="w-10 h-10" />
-                                  </div>
-                                )}
-                              </div>
+                    {/* Seller group cards */}
+                    {sellerGroups.map((group) => {
+                      const isSelected = selectedSellerId === group.sellerId;
+                      const isCollapsed = collapsedGroups[group.sellerId];
+                      const groupShipping = getGroupShippingFee(group.items);
+                      const groupSubtotal = getGroupSubtotal(group.items);
+                      const groupTotal = getGroupTotal(group.items);
+                      const groupQty = getGroupTotalQty(group.items);
+                      const fixedApplied = groupQty >= 3;
+                      const rawShipping = getGroupRawShipping(group.items);
+                      const savings = fixedApplied ? Math.max(0, rawShipping - FIXED_SHIPPING_FEE_3PLUS) : 0;
 
-                              {/* Product Details */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-start mb-3">
-                                  <div className="flex-1 min-w-0 pr-4">
-                                    <h3 
-                                      className="font-bold text-gray-900 mb-1 cursor-pointer hover:text-blue-600 transition"
-                                      onClick={() => navigate(`/buyer/products/${item.product_id}`)}
-                                    >
-                                      {item.product?.product_name}
-                                    </h3>
-                                    {item.product?.brand && (
-                                      <p className="text-sm text-gray-500">
-                                        {item.product.brand}
-                                      </p>
-                                    )}
-                                    {item.product?.category && (
-                                      <p className="text-sm text-gray-500">{item.product.category}</p>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Remove Button */}
-                                  <button
-                                    onClick={() => removeFromCart(item.id)}
-                                    className="text-gray-400 hover:text-red-600 transition flex-shrink-0"
-                                    title="Remove from cart"
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                  </button>
-                                </div>
-
-                                {/* Price and Quantity Controls */}
-                                <div className="flex items-center justify-between mt-4">
-                                  {/* Price */}
-                                  <div>
-                                    {item.product?.discount_percentage > 0 ? (
-                                      <div className="flex items-baseline gap-2">
-                                        <span className="text-lg font-bold text-green-600">
-                                          ₱{getItemPrice(item).toFixed(2)}
-                                        </span>
-                                        <span className="text-sm text-gray-400 line-through">
-                                          ₱{item.product.price}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <span className="text-lg font-bold text-gray-900">
-                                        ₱{getItemPrice(item).toFixed(2)}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* Quantity Controls */}
-                                  <div className="flex items-center gap-4">
-                                    <div className="flex items-center gap-3 bg-gray-100 rounded-lg p-1">
-                                      <button
-                                        onClick={() => updateQuantityLocal(item.id, item.quantity - 1)}
-                                        disabled={item.quantity <= 1}
-                                        className="w-8 h-8 flex items-center justify-center bg-white hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-700 rounded-lg font-bold transition shadow-sm"
-                                      >
-                                        −
-                                      </button>
-                                      <span className="w-8 text-center font-bold text-gray-900">
-                                        {item.quantity}
-                                      </span>
-                                      <button
-                                        onClick={() => updateQuantityLocal(item.id, item.quantity + 1)}
-                                        disabled={item.quantity >= item.product?.stock_quantity}
-                                        className="w-8 h-8 flex items-center justify-center bg-white hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-700 rounded-lg font-bold transition shadow-sm"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-
-                                    {/* Item Total */}
-                                    <div className="text-right min-w-[80px]">
-                                      <p className="text-sm text-gray-500">Total</p>
-                                      <p className="text-lg font-bold text-gray-900">₱{getItemTotal(item)}</p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Stock Warning */}
-                                {item.product?.stock_quantity <= 10 && (
-                                  <div className="mt-3">
-                                    <span className="text-xs text-orange-600 bg-orange-50 px-3 py-1 rounded-full font-medium">
-                                      Only {item.product.stock_quantity} left in stock
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="p-6 bg-gray-50 border-t border-gray-100 flex gap-3">
-                        <button
-                          onClick={handleContinueShopping}
-                          className="flex-1 bg-white border-2 border-gray-200 text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-100 hover:border-gray-300 transition font-semibold"
-                        >
-                          Continue Shopping
-                        </button>
-                        <button
-                          onClick={updateCartOnServer}
-                          disabled={!hasChanges || loading}
-                          className={`flex-1 py-3 px-6 rounded-xl transition font-semibold ${
-                            hasChanges && !loading
-                              ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
-                              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      return (
+                        <div
+                          key={group.sellerId}
+                          className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition-all ${
+                            hasMultipleSellers
+                              ? isSelected
+                                ? 'border-blue-500 ring-2 ring-blue-200'
+                                : 'border-gray-200 hover:border-blue-300'
+                              : 'border-gray-100'
                           }`}
                         >
-                          {loading ? 'Updating...' : 'Update Cart'}
-                        </button>
-                      </div>
+                          {/* Seller Header */}
+                          <div
+                            className={`flex items-center justify-between p-4 cursor-pointer ${
+                              isSelected ? 'bg-blue-50' : 'bg-gray-50'
+                            } border-b border-gray-100`}
+                            onClick={() => hasMultipleSellers && setSelectedSellerId(isSelected ? null : group.sellerId)}
+                          >
+                            <div className="flex items-center gap-3">
+                              {/* Seller select radio (only show if multiple sellers) */}
+                              {hasMultipleSellers && (
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                                  isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
+                                }`}>
+                                  {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                                </div>
+                              )}
+                              <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                <Store className="w-5 h-5 text-white" />
+                              </div>
+                              <div>
+                                <p className="font-bold text-gray-900 text-sm">{group.sellerName}</p>
+                                <p className="text-xs text-gray-500">
+                                  {group.items.length} product{group.items.length !== 1 ? 's' : ''} · {groupQty} item{groupQty !== 1 ? 's' : ''}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-xs text-gray-500">Group total</p>
+                                <p className="font-bold text-gray-900">₱{groupTotal.toFixed(2)}</p>
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleGroup(group.sellerId); }}
+                                className="text-gray-400 hover:text-gray-700 transition"
+                              >
+                                {isCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Items list */}
+                          {!isCollapsed && (
+                            <div className="divide-y divide-gray-100">
+                              {group.items.map(item => renderCartItem(item))}
+                            </div>
+                          )}
+
+                          {/* Group shipping summary */}
+                          {!isCollapsed && (
+                            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                              <span className="text-gray-600">
+                                Subtotal: <strong className="text-gray-900">₱{groupSubtotal.toFixed(2)}</strong>
+                              </span>
+                              <span className="text-gray-600 flex items-center gap-1">
+                                Shipping: <strong className="text-gray-900">₱{groupShipping.toFixed(2)}</strong>
+                                {fixedApplied && (
+                                  <span className="ml-1 text-xs text-green-600 font-medium">
+                                    Fixed ({groupQty}+ items{savings > 0 ? `, save ₱${savings.toFixed(2)}` : ''})
+                                  </span>
+                                )}
+                              </span>
+
+                              {/* Checkout this seller button */}
+                              {hasMultipleSellers && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedSellerId(group.sellerId);
+                                  }}
+                                  className={`ml-auto text-xs px-3 py-1 rounded-lg font-semibold transition ${
+                                    isSelected
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-white border border-blue-300 text-blue-600 hover:bg-blue-50'
+                                  }`}
+                                >
+                                  {isSelected ? '✓ Selected for Checkout' : 'Select for Checkout'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Action buttons */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex gap-3">
+                      <button
+                        onClick={() => navigate('/buyer/products')}
+                        className="flex-1 bg-white border-2 border-gray-200 text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-100 hover:border-gray-300 transition font-semibold"
+                      >
+                        Continue Shopping
+                      </button>
+                      <button
+                        onClick={updateCartOnServer}
+                        disabled={!hasChanges || loading}
+                        className={`flex-1 py-3 px-6 rounded-xl transition font-semibold ${
+                          hasChanges && !loading
+                            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {loading ? 'Updating...' : 'Update Cart'}
+                      </button>
                     </div>
                   </div>
 
-                  {/* Order Summary */}
+                  {/* ── Right: Order Summary ── */}
                   <div className="lg:col-span-1">
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sticky top-4">
-                      <h2 className="text-xl font-bold text-gray-900 mb-6">Order Summary</h2>
-                      
-                      <div className="space-y-4 mb-6">
-                        <div className="flex justify-between text-gray-600">
-                          <span>Subtotal</span>
-                          <span className="font-bold text-gray-900">₱{getSubtotal()}</span>
-                        </div>
-                        
-                        {/* ✅ NEW Shipping Fee display with breakdown */}
-                        <div className="flex justify-between text-gray-600">
-                          <div className="flex flex-col">
-                            <span>Shipping Fee</span>
-                            {totalProducts === 2 && (
-                              <span className="text-xs text-blue-600 mt-0.5">Sum of individual fees</span>
-                            )}
-                            {fixedApplied && (
-                              <span className="text-xs text-green-600 font-medium mt-0.5">
-                                Fixed flat fee (3+ items)
-                                {savings > 0 && ` · save ₱${savings.toFixed(2)}`}
-                              </span>
-                            )}
-                          </div>
-                          <span className="font-bold text-gray-900">
-                            ₱{getShippingFee().toFixed(2)}
-                          </span>
-                        </div>
+                      <h2 className="text-xl font-bold text-gray-900 mb-2">Order Summary</h2>
 
-                        {/* ✅ Shipping Policy Info Box */}
-                        {totalProducts === 1 && (
-                          <div className="text-xs bg-gray-50 border border-gray-200 p-3 rounded-lg text-gray-600">
-                            <p className="font-medium text-gray-800 mb-1">📦 Shipping</p>
-                            <p>Individual product shipping fee applies</p>
-                          </div>
-                        )}
-
-                        {totalProducts === 2 && (
-                          <div className="text-xs bg-blue-50 border border-blue-200 p-3 rounded-lg text-blue-700">
-                            <p className="font-medium text-blue-800 mb-1">📦 Combined Shipping</p>
-                            <p>Sum of each product's individual fee</p>
-                          </div>
-                        )}
-
-                        {fixedApplied && (
-                          <div className="text-xs bg-green-50 border border-green-200 p-3 rounded-lg text-green-700">
-                            <div className="flex items-start gap-2">
-                              <span className="text-sm">✓</span>
+                      {/* Multi-seller: show which group is selected */}
+                      {hasMultipleSellers && (
+                        <div className="mb-4">
+                          {selectedGroup ? (
+                            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                              <Store className="w-4 h-4 text-blue-600 flex-shrink-0" />
                               <div>
-                                <p className="font-medium text-green-800 mb-1">Fixed ₱{FIXED_SHIPPING_FEE_3PLUS} Shipping</p>
-                                <p>Flat fee for 3+ products{savings > 0 && ` — you save ₱${savings.toFixed(2)}!`}</p>
+                                <p className="text-xs text-blue-700 font-semibold">Checking out from:</p>
+                                <p className="text-sm font-bold text-blue-900">{selectedGroup.sellerName}</p>
                               </div>
                             </div>
-                          </div>
-                        )}
+                          ) : (
+                            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                              <p className="text-xs text-amber-700 font-medium">
+                                Select a seller group to see the summary
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                        <div className="border-t-2 border-gray-200 pt-4">
-                          <div className="flex justify-between items-center">
-                            <span className="text-lg font-bold text-gray-900">Total</span>
-                            <span className="text-3xl font-bold text-blue-600">₱{getTotal()}</span>
+                      {/* Summary values — for single seller show all; for multi show selected */}
+                      {(!hasMultipleSellers || selectedGroup) && (
+                        <div className="space-y-3 mb-6">
+                          <div className="flex justify-between text-gray-600">
+                            <span>Subtotal</span>
+                            <span className="font-bold text-gray-900">
+                              ₱{hasMultipleSellers ? getSelectedSubtotal() : getGroupSubtotal(cartItems).toFixed(2)}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between text-gray-600">
+                            <div className="flex flex-col">
+                              <span>Shipping Fee</span>
+                              {(hasMultipleSellers ? selectedFixedApplied : getGroupTotalQty(cartItems) >= 3) && (
+                                <span className="text-xs text-green-600 font-medium mt-0.5">
+                                  Fixed flat fee (3+ items)
+                                  {(hasMultipleSellers ? selectedSavings : Math.max(0, getGroupRawShipping(cartItems) - FIXED_SHIPPING_FEE_3PLUS)) > 0 &&
+                                    ` · save ₱${(hasMultipleSellers ? selectedSavings : Math.max(0, getGroupRawShipping(cartItems) - FIXED_SHIPPING_FEE_3PLUS)).toFixed(2)}`
+                                  }
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-bold text-gray-900">
+                              ₱{hasMultipleSellers ? getSelectedShipping() : getGroupShippingFee(cartItems).toFixed(2)}
+                            </span>
+                          </div>
+
+                          {/* Green box for fixed shipping */}
+                          {(hasMultipleSellers ? selectedFixedApplied : getGroupTotalQty(cartItems) >= 3) && (
+                            <div className="text-xs bg-green-50 border border-green-200 p-3 rounded-lg text-green-700">
+                              <div className="flex items-start gap-2">
+                                <span className="text-sm">✓</span>
+                                <div>
+                                  <p className="font-medium text-green-800">Fixed ₱{FIXED_SHIPPING_FEE_3PLUS} Shipping</p>
+                                  <p>
+                                    Flat fee for 3+ products
+                                    {(hasMultipleSellers ? selectedSavings : Math.max(0, getGroupRawShipping(cartItems) - FIXED_SHIPPING_FEE_3PLUS)) > 0 &&
+                                      ` — you save ₱${(hasMultipleSellers ? selectedSavings : Math.max(0, getGroupRawShipping(cartItems) - FIXED_SHIPPING_FEE_3PLUS)).toFixed(2)}!`
+                                    }
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="border-t-2 border-gray-200 pt-4">
+                            <div className="flex justify-between items-center">
+                              <span className="text-lg font-bold text-gray-900">Total</span>
+                              <span className="text-3xl font-bold text-blue-600">
+                                ₱{hasMultipleSellers ? getSelectedTotal() : getGroupTotal(cartItems).toFixed(2)}
+                              </span>
+                            </div>
+                            {hasMultipleSellers && (
+                              <p className="text-xs text-gray-400 mt-1 text-right">
+                                For selected seller only
+                              </p>
+                            )}
                           </div>
                         </div>
-                      </div>
+                      )}
 
+                      {/* Checkout button */}
                       <button
                         onClick={handleCheckout}
-                        disabled={hasChanges}
+                        disabled={hasChanges || (hasMultipleSellers && !selectedSellerId)}
                         className={`w-full py-4 px-6 rounded-xl transition font-bold text-lg flex items-center justify-center gap-2 ${
-                          hasChanges
+                          hasChanges || (hasMultipleSellers && !selectedSellerId)
                             ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                             : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl'
                         }`}
                       >
                         <CheckCircle className="w-6 h-6" />
-                        Proceed to Checkout
+                        {hasMultipleSellers && !selectedSellerId ? 'Select a Seller Group' : 'Proceed to Checkout'}
                       </button>
 
                       {hasChanges && (
@@ -551,62 +649,84 @@ const CartPage = ({ userId }) => {
                         </p>
                       )}
 
-                      {/* Additional Info */}
-                      <div className="mt-6 pt-6 border-t border-gray-200 space-y-4">
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center flex-shrink-0">
-                            <CheckCircle className="w-5 h-5 text-emerald-600" />
-                          </div>
-                          <div>
-                            <h3 className="font-bold text-gray-900 mb-1">Final Shipping</h3>
-                            <p className="text-sm text-gray-600">
-                              Calculated at checkout based on your delivery location
+                      {hasMultipleSellers && !selectedSellerId && !hasChanges && (
+                        <p className="text-sm text-amber-600 text-center mt-3 font-medium">
+                          Select one seller group above to continue
+                        </p>
+                      )}
+
+                      {/* Multi-seller: other groups summary */}
+                      {hasMultipleSellers && sellerGroups.length > 1 && (
+                        <div className="mt-5 pt-5 border-t border-gray-200">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                            Other seller groups
+                          </p>
+                          <div className="space-y-2">
+                            {sellerGroups
+                              .filter(g => g.sellerId !== selectedSellerId)
+                              .map(g => (
+                                <div key={g.sellerId} className="flex items-center justify-between text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <Store className="w-4 h-4 text-gray-400" />
+                                    <span className="text-gray-600 truncate max-w-[120px]">{g.sellerName}</span>
+                                  </div>
+                                  <span className="text-gray-700 font-medium">₱{getGroupTotal(g.items).toFixed(2)}</span>
+                                </div>
+                              ))
+                            }
+                            <p className="text-xs text-gray-400 mt-2">
+                              Complete this checkout first, then return to checkout the remaining items.
                             </p>
                           </div>
                         </div>
+                      )}
 
+                      {/* Security badges */}
+                      <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
                         <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center flex-shrink-0">
+                          <div className="w-9 h-9 bg-emerald-50 rounded-full flex items-center justify-center flex-shrink-0">
+                            <CheckCircle className="w-5 h-5 text-emerald-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-sm">Shipping Calculated at Checkout</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Based on your delivery location</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <div className="w-9 h-9 bg-blue-50 rounded-full flex items-center justify-center flex-shrink-0">
                             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                             </svg>
                           </div>
                           <div>
-                            <h3 className="font-bold text-gray-900 mb-1">Secure Checkout</h3>
-                            <p className="text-sm text-gray-600">
-                              Your payment information is protected
-                            </p>
+                            <h3 className="font-bold text-gray-900 text-sm">Secure Checkout</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Your payment info is protected</p>
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
+
                 </div>
               )}
             </>
           )}
 
           {/* Orders Tab */}
-          {activeTab === 'orders' && (
-            <OrdersPage userId={currentUserId} />
-          )}
+          {activeTab === 'orders' && <OrdersPage userId={currentUserId} />}
 
           {/* Messages Tab */}
-          {activeTab === 'messages' && (
-            <MessagesTab userId={currentUserId} />
-          )}
+          {activeTab === 'messages' && <MessagesTab userId={currentUserId} />}
+
         </div>
       </div>
 
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out;
-        }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
       `}</style>
     </div>
   );
