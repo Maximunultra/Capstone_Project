@@ -703,16 +703,19 @@ router.post("/", async (req, res) => {
 
     console.log('✅ Product stock updated');
 
-    const { error: clearCartError } = await supabase
-      .from("cart")
-      .delete()
-      .eq("user_id", user_id);
+   // ✅ FIX — only delete the specific items that were ordered
+const cartItemIds = cart_items.map(item => item.id).filter(Boolean);
 
-    if (clearCartError) {
-      console.error('⚠️ Error clearing cart:', clearCartError);
-    } else {
-      console.log('✅ Cart cleared');
-    }
+const { error: clearCartError } = await supabase
+  .from("cart")
+  .delete()
+  .in("id", cartItemIds);
+
+if (clearCartError) {
+  console.error('⚠️ Error clearing cart items:', clearCartError);
+} else {
+  console.log(`✅ Cleared ${cartItemIds.length} cart items (remaining items kept)`);
+}
 
     // 🔓 DECRYPT before sending to client
     const decryptedOrder = decryptShippingInfo(order);
