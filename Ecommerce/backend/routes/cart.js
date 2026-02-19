@@ -8,26 +8,29 @@ router.get("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
     
-    const { data, error } = await supabase
-      .from("cart")
-      .select(`
-        *,
-        product:product_id (
-          id,
-          product_name,
-          price,
-          product_image,
-          category,
-          stock_quantity,
-          discount_percentage,
-          brand,
-          is_active,
-          rating_average,
-          rating_count
-        )
-      `)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
+    // cart.js router — GET /:userId
+const { data, error } = await supabase
+  .from("cart")
+  .select(`
+    *,
+    product:product_id (
+      id,
+      product_name,
+      price,
+      product_image,
+      category,
+      stock_quantity,
+      discount_percentage,
+      brand,
+      is_active,
+      rating_average,
+      rating_count,
+      shipping_fee,
+      user_id
+    )
+  `)
+  .eq("user_id", userId)
+  .order("created_at", { ascending: false });
 
     if (error) throw error;
 
