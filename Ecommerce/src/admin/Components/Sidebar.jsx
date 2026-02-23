@@ -28,7 +28,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     // { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     // { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
-    { to: `/${rolePrefix}/users`, label: "Sellers", icon: <Users className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
+    { to: `/${rolePrefix}/users`, label: "Users Management", icon: <Users className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
   ];
 
   const handleNavClick = () => {
