@@ -16,10 +16,10 @@ const SellerOrderManagement = () => {
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // ✅ NEW: Message/Note Modal States
+  // ✅ Message/Note Modal States
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
-  const [messageType, setMessageType] = useState('update'); // 'update', 'delay', 'delivery'
+  const [messageType, setMessageType] = useState('update');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState('');
 
@@ -28,7 +28,6 @@ const SellerOrderManagement = () => {
   const currentUserId = currentUser.id;
   const currentUserRole = currentUser.role;
 
-  // Fetch orders based on user role
   useEffect(() => {
     fetchOrders();
   }, [statusFilter]);
@@ -36,36 +35,20 @@ const SellerOrderManagement = () => {
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching orders for user:', currentUserId, 'Role:', currentUserRole);
-
       let url = `${API_BASE_URL}/orders`;
       const params = new URLSearchParams();
       
       if (currentUserRole === 'seller' && currentUserId) {
         params.append('seller_id', currentUserId);
       }
-      
       if (statusFilter !== 'all') {
         params.append('status', statusFilter);
       }
-
-      if (params.toString()) {
-        url += `?${params.toString()}`;
-      }
-
-      console.log('📡 API Request URL:', url);
+      if (params.toString()) url += `?${params.toString()}`;
 
       const response = await fetch(url);
       const data = await response.json();
-      
-      console.log('📦 Orders received:', data);
-
-      if (data.success) {
-        setOrders(data.orders);
-        console.log(`✅ Loaded ${data.orders.length} orders`);
-      } else {
-        console.error('❌ Failed to fetch orders:', data.error);
-      }
+      if (data.success) setOrders(data.orders);
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
     } finally {
@@ -75,12 +58,10 @@ const SellerOrderManagement = () => {
 
   const handleUpdateStatus = async () => {
     if (!selectedOrder || !selectedStatus) return;
-    
     if (selectedOrder.order_status === 'delivered') {
       alert('Cannot change status of delivered orders');
       return;
     }
-    
     try {
       setSaving(true);
       const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/status`, {
@@ -88,7 +69,6 @@ const SellerOrderManagement = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_status: selectedStatus })
       });
-      
       const data = await response.json();
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, order_status: selectedStatus } : o));
@@ -98,7 +78,6 @@ const SellerOrderManagement = () => {
         alert(data.error || 'Failed to update status');
       }
     } catch (error) {
-      console.error('Error updating status:', error);
       alert('Error updating status');
     } finally {
       setSaving(false);
@@ -107,12 +86,10 @@ const SellerOrderManagement = () => {
 
   const handleUpdatePaymentStatus = async () => {
     if (!selectedOrder || !selectedPaymentStatus) return;
-    
     if (selectedOrder.payment_method !== 'cod') {
       alert('Payment status can only be modified for COD orders');
       return;
     }
-    
     try {
       setSaving(true);
       const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/payment`, {
@@ -120,7 +97,6 @@ const SellerOrderManagement = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_status: selectedPaymentStatus })
       });
-      
       const data = await response.json();
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, payment_status: selectedPaymentStatus } : o));
@@ -130,7 +106,6 @@ const SellerOrderManagement = () => {
         alert(data.error || 'Failed to update payment status');
       }
     } catch (error) {
-      console.error('Error updating payment status:', error);
       alert('Error updating payment status');
     } finally {
       setSaving(false);
@@ -139,7 +114,6 @@ const SellerOrderManagement = () => {
 
   const handleUpdateTracking = async () => {
     if (!selectedOrder || !trackingNumber.trim()) return;
-    
     try {
       setSaving(true);
       const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/tracking`, {
@@ -147,7 +121,6 @@ const SellerOrderManagement = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tracking_number: trackingNumber })
       });
-      
       const data = await response.json();
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, tracking_number: trackingNumber } : o));
@@ -156,14 +129,12 @@ const SellerOrderManagement = () => {
         alert('Tracking number updated successfully!');
       }
     } catch (error) {
-      console.error('Error updating tracking:', error);
       alert('Error updating tracking number');
     } finally {
       setSaving(false);
     }
   };
 
-  // ✅ NEW: Open Message Modal
   const handleOpenMessageModal = () => {
     setShowMessageModal(true);
     setMessageText('');
@@ -171,48 +142,33 @@ const SellerOrderManagement = () => {
     setMessageError('');
   };
 
-  // ✅ NEW: Send Message to Buyer
   const handleSendMessage = async () => {
     setMessageError('');
-    
     if (!messageText.trim()) {
       setMessageError('Please enter a message');
       return;
     }
-
-    // Get buyer's user_id from the order - it might be in different fields depending on API response
     const buyerId = selectedOrder.user_id || selectedOrder.buyer_id || selectedOrder.customer_id;
-    
     if (!buyerId) {
       setMessageError('Buyer information not available. Please contact support.');
-      console.error('Missing buyer ID in order:', selectedOrder);
       return;
     }
-
     setSendingMessage(true);
     try {
       const messageData = {
         sender_id: currentUserId,
         receiver_id: buyerId,
         message: messageText.trim(),
-        order_id: parseInt(selectedOrder.id), // ✅ Include order_id (backend validation updated)
+        order_id: parseInt(selectedOrder.id),
         product_id: selectedOrder.order_items?.[0]?.product_id || null
       };
-      
-      console.log('📨 Sending message:', messageData);
-
       const response = await fetch(`${API_BASE_URL}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(messageData)
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send message');
-      }
-
+      if (!response.ok) throw new Error(data.error || 'Failed to send message');
       alert('✅ Message sent to buyer successfully!');
       setShowMessageModal(false);
       setMessageText('');
@@ -223,7 +179,6 @@ const SellerOrderManagement = () => {
     }
   };
 
-  // ✅ NEW: Quick message templates
   const getMessageTemplate = (type) => {
     const templates = {
       update: `Hello! This is an update regarding your order #${selectedOrder?.order_number || ''}.\n\n`,
@@ -269,15 +224,11 @@ const SellerOrderManagement = () => {
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+      month: 'short', day: 'numeric', year: 'numeric'
     });
   };
 
-  const formatCurrency = (amount) => {
-    return `₱${parseFloat(amount).toFixed(2)}`;
-  };
+  const formatCurrency = (amount) => `₱${parseFloat(amount).toFixed(2)}`;
 
   const getTotalItems = (orderItems) => {
     if (!orderItems || orderItems.length === 0) return 0;
@@ -294,17 +245,14 @@ const SellerOrderManagement = () => {
               {currentUserRole === 'seller' ? 'My Orders' : 'Order Management'}
             </h1>
             <p className="text-gray-600">
-              {currentUserRole === 'seller' 
-                ? 'Manage orders containing your products' 
+              {currentUserRole === 'seller'
+                ? 'Manage orders containing your products'
                 : 'Manage all customer orders'}
             </p>
           </div>
-
           {currentUserRole === 'admin' && (
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-6 py-3">
-              <p className="text-sm text-blue-800 font-medium">
-                👁️ Admin View - All Orders
-              </p>
+              <p className="text-sm text-blue-800 font-medium">👁️ Admin View - All Orders</p>
             </div>
           )}
         </div>
@@ -342,8 +290,8 @@ const SellerOrderManagement = () => {
               <div className="text-6xl mb-4">📦</div>
               <p className="text-gray-600 text-lg font-medium mb-2">No orders found</p>
               <p className="text-gray-500 text-sm">
-                {currentUserRole === 'seller' 
-                  ? 'Orders containing your products will appear here' 
+                {currentUserRole === 'seller'
+                  ? 'Orders containing your products will appear here'
                   : 'No orders match your filters'}
               </p>
             </div>
@@ -369,7 +317,6 @@ const SellerOrderManagement = () => {
                     const paymentConfig = getPaymentStatusConfig(order.payment_status);
                     const StatusIcon = statusConfig.icon;
                     const totalItems = getTotalItems(order.order_items);
-                    
                     return (
                       <tr
                         key={order.id}
@@ -378,49 +325,34 @@ const SellerOrderManagement = () => {
                         }`}
                         onClick={() => openOrderDetails(order)}
                       >
-                        <td className="px-6 py-4 font-semibold text-gray-900">
-                          {order.order_number}
-                        </td>
+                        <td className="px-6 py-4 font-semibold text-gray-900">{order.order_number}</td>
                         <td className="px-6 py-4">
                           <div className="font-medium text-gray-900">{order.shipping_full_name}</div>
                           <div className="text-sm text-gray-500">{order.shipping_email}</div>
                         </td>
-                        <td className="px-6 py-4 text-gray-600">
-                          {formatDate(order.order_date)}
-                        </td>
+                        <td className="px-6 py-4 text-gray-600">{formatDate(order.order_date)}</td>
                         <td className="px-6 py-4">
                           <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">
                             <ShoppingBag size={14} />
                             {totalItems} {totalItems === 1 ? 'item' : 'items'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 font-bold text-gray-900">
-                          {formatCurrency(order.total_amount)}
-                        </td>
+                        <td className="px-6 py-4 font-bold text-gray-900">{formatCurrency(order.total_amount)}</td>
                         <td className="px-6 py-4">
-                          <span 
-                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${statusConfig.color}`}
-                          >
+                          <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${statusConfig.color}`}>
                             <StatusIcon size={14} />
                             {statusConfig.label}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span 
-                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${paymentConfig.color}`}
-                          >
+                          <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${paymentConfig.color}`}>
                             {paymentConfig.label}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {order.tracking_number || '—'}
-                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{order.tracking_number || '—'}</td>
                         <td className="px-6 py-4">
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openOrderDetails(order);
-                            }}
+                            onClick={(e) => { e.stopPropagation(); openOrderDetails(order); }}
                             className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-105 ${
                               currentUserRole === 'admin'
                                 ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white'
@@ -456,21 +388,16 @@ const SellerOrderManagement = () => {
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
                   Order Details
                 </h2>
-                <p className="text-gray-600 font-medium">
-                  {selectedOrder.order_number}
-                </p>
+                <p className="text-gray-600 font-medium">{selectedOrder.order_number}</p>
               </div>
-              <button
-                onClick={closeOrderDetails}
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors duration-200"
-              >
+              <button onClick={closeOrderDetails} className="p-2 hover:bg-gray-100 rounded-xl transition-colors duration-200">
                 <X size={24} className="text-gray-600" />
               </button>
             </div>
 
             {/* Modal Body */}
             <div className="p-8 space-y-6">
-              {/* ✅ NEW: Message Buyer Button (Seller Only) */}
+              {/* Message Buyer Button (Seller Only) */}
               {currentUserRole === 'seller' && (
                 <div>
                   <button
@@ -499,22 +426,15 @@ const SellerOrderManagement = () => {
                         <div key={index} className="p-4 flex gap-4 hover:bg-white/50 transition-colors">
                           <div className="flex-shrink-0">
                             {item.product_image ? (
-                              <img
-                                src={item.product_image}
-                                alt={item.product_name}
-                                className="w-20 h-20 object-cover rounded-lg border-2 border-amber-200"
-                              />
+                              <img src={item.product_image} alt={item.product_name} className="w-20 h-20 object-cover rounded-lg border-2 border-amber-200" />
                             ) : (
                               <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-amber-200">
                                 <Package size={32} className="text-gray-400" />
                               </div>
                             )}
                           </div>
-
                           <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-gray-900 mb-1 truncate">
-                              {item.product_name}
-                            </h4>
+                            <h4 className="font-bold text-gray-900 mb-1 truncate">{item.product_name}</h4>
                             <div className="flex flex-wrap gap-2 text-sm text-gray-600 mb-2">
                               {item.product_category && (
                                 <span className="inline-flex items-center px-2 py-1 bg-white rounded-md border border-amber-200">
@@ -530,58 +450,37 @@ const SellerOrderManagement = () => {
                               )}
                             </div>
                             <div className="flex items-center gap-4 text-sm">
-                              <span className="text-gray-600">
-                                <span className="font-medium">Quantity:</span> {item.quantity}
-                              </span>
-                              <span className="text-gray-600">
-                                <span className="font-medium">Unit Price:</span> {formatCurrency(item.unit_price)}
-                              </span>
+                              <span className="text-gray-600"><span className="font-medium">Quantity:</span> {item.quantity}</span>
+                              <span className="text-gray-600"><span className="font-medium">Unit Price:</span> {formatCurrency(item.unit_price)}</span>
                             </div>
                           </div>
-
                           <div className="flex-shrink-0 text-right">
                             <p className="text-xs text-gray-500 mb-1">Subtotal</p>
-                            <p className="text-lg font-bold text-gray-900">
-                              {formatCurrency(item.subtotal)}
-                            </p>
+                            <p className="text-lg font-bold text-gray-900">{formatCurrency(item.subtotal)}</p>
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="p-8 text-center text-gray-500">
-                      No items found in this order
-                    </div>
+                    <div className="p-8 text-center text-gray-500">No items found in this order</div>
                   )}
                 </div>
               </div>
 
               {/* Customer Information */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                  Customer Information
-                </h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Customer Information</h3>
                 <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl space-y-2">
-                  <div className="text-gray-900">
-                    <strong>Name:</strong> {selectedOrder.shipping_full_name}
-                  </div>
-                  <div className="text-gray-900">
-                    <strong>Email:</strong> {selectedOrder.shipping_email}
-                  </div>
-                  <div className="text-gray-900">
-                    <strong>Phone:</strong> {selectedOrder.shipping_phone}
-                  </div>
-                  <div className="text-gray-900">
-                    <strong>Address:</strong> {selectedOrder.shipping_address}, {selectedOrder.shipping_city}, {selectedOrder.shipping_province} {selectedOrder.shipping_postal_code}
-                  </div>
+                  <div className="text-gray-900"><strong>Name:</strong> {selectedOrder.shipping_full_name}</div>
+                  <div className="text-gray-900"><strong>Email:</strong> {selectedOrder.shipping_email}</div>
+                  <div className="text-gray-900"><strong>Phone:</strong> {selectedOrder.shipping_phone}</div>
+                  <div className="text-gray-900"><strong>Address:</strong> {selectedOrder.shipping_address}, {selectedOrder.shipping_city}, {selectedOrder.shipping_province} {selectedOrder.shipping_postal_code}</div>
                 </div>
               </div>
 
               {/* Order Status */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                  Order Status
-                </h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Order Status</h3>
                 {currentUserRole === 'admin' ? (
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                     <div>
@@ -598,9 +497,7 @@ const SellerOrderManagement = () => {
                   </div>
                 ) : selectedOrder.order_status === 'delivered' ? (
                   <div className="bg-gradient-to-r from-emerald-50 to-green-50 p-5 rounded-xl flex items-center justify-between">
-                    <span className="font-medium text-gray-900">
-                      Delivered (Cannot be changed)
-                    </span>
+                    <span className="font-medium text-gray-900">Delivered (Cannot be changed)</span>
                     <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 bg-emerald-100 text-emerald-700 border-emerald-200">
                       <CheckCircle size={14} />
                       Delivered
@@ -635,9 +532,7 @@ const SellerOrderManagement = () => {
               {/* Payment Status - Only for COD */}
               {selectedOrder.payment_method === 'cod' && (
                 <div>
-                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                    Payment Status (COD)
-                  </h3>
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Payment Status (COD)</h3>
                   {currentUserRole === 'admin' ? (
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                       <div>
@@ -678,16 +573,12 @@ const SellerOrderManagement = () => {
 
               {/* Tracking Number */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                  Tracking Number
-                </h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Tracking Number</h3>
                 {currentUserRole === 'admin' ? (
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Tracking Number</p>
-                      <p className="font-medium text-gray-900">
-                        {selectedOrder.tracking_number || 'No tracking number'}
-                      </p>
+                      <p className="font-medium text-gray-900">{selectedOrder.tracking_number || 'No tracking number'}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500 mb-1">👁️ View Only</p>
@@ -713,10 +604,7 @@ const SellerOrderManagement = () => {
                         {saving ? 'Saving...' : 'Save'}
                       </button>
                       <button
-                        onClick={() => {
-                          setEditingTracking(false);
-                          setTrackingNumber(selectedOrder.tracking_number || '');
-                        }}
+                        onClick={() => { setEditingTracking(false); setTrackingNumber(selectedOrder.tracking_number || ''); }}
                         className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border-2 border-gray-200 py-3 rounded-xl font-bold transition-all duration-300"
                       >
                         Cancel
@@ -725,9 +613,7 @@ const SellerOrderManagement = () => {
                   </div>
                 ) : (
                   <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl flex justify-between items-center">
-                    <span className="font-medium text-gray-900">
-                      {selectedOrder.tracking_number || 'No tracking number'}
-                    </span>
+                    <span className="font-medium text-gray-900">{selectedOrder.tracking_number || 'No tracking number'}</span>
                     <button
                       onClick={() => setEditingTracking(true)}
                       className="bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-200 px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2"
@@ -741,9 +627,7 @@ const SellerOrderManagement = () => {
 
               {/* Order Summary */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                  Order Summary
-                </h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Order Summary</h3>
                 <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-xl space-y-3">
                   <div className="flex justify-between text-gray-700">
                     <span>Subtotal</span>
@@ -772,134 +656,123 @@ const SellerOrderManagement = () => {
         </div>
       )}
 
-      {/* ✅ NEW: Message Modal */}
+      {/* ✅ UPDATED: Message Modal - Fully Responsive for All Screen Sizes */}
       {showMessageModal && selectedOrder && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <MessageCircle className="w-6 h-6" />
-                <div>
-                  <h2 className="text-xl font-bold">Send Message to Buyer</h2>
-                  <p className="text-sm text-blue-100">Order #{selectedOrder.order_number}</p>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
+          {/* 
+            Mobile (< sm): Slides up from bottom like a sheet — full width, rounded top corners only
+            Tablet/Desktop (≥ sm): Centered dialog with max-width and rounded corners all around
+          */}
+          <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+
+            {/* Modal Header — sticky, never scrolls away */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 sm:px-6 py-4 sm:py-5 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
+              {/* Drag handle pill for mobile bottom-sheet feel */}
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/40 rounded-full sm:hidden" />
+              <div className="flex items-center gap-3 min-w-0">
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-xl font-bold leading-tight">Send Message to Buyer</h2>
+                  <p className="text-xs sm:text-sm text-blue-100 truncate">Order #{selectedOrder.order_number}</p>
                 </div>
               </div>
               <button
-                onClick={() => {
-                  setShowMessageModal(false);
-                  setMessageText('');
-                  setMessageError('');
-                }}
-                className="text-white hover:bg-white/20 rounded-lg p-2 transition"
+                onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition flex-shrink-0 ml-2 touch-manipulation"
+                aria-label="Close"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6">
+            {/* Modal Body — scrollable middle section */}
+            <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+
               {/* Quick Templates */}
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Quick Templates
-                </label>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Quick Templates</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setMessageText(getMessageTemplate('update'))}
-                    className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition border border-blue-200"
-                  >
-                    📝 General Update
-                  </button>
-                  <button
-                    onClick={() => setMessageText(getMessageTemplate('delay'))}
-                    className="px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg text-sm font-medium transition border border-orange-200"
-                  >
-                    ⏰ Delay Notice
-                  </button>
-                  <button
-                    onClick={() => setMessageText(getMessageTemplate('delivery'))}
-                    className="px-4 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-sm font-medium transition border border-green-200"
-                  >
-                    🚚 Delivery Today
-                  </button>
-                  <button
-                    onClick={() => setMessageText(getMessageTemplate('weather'))}
-                    className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-sm font-medium transition border border-purple-200"
-                  >
-                    🌧️ Weather Delay
-                  </button>
+                  {[
+                    { type: 'update', emoji: '📝', label: 'General Update', bg: 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' },
+                    { type: 'delay', emoji: '⏰', label: 'Delay Notice', bg: 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200' },
+                    { type: 'delivery', emoji: '🚚', label: 'Delivery Today', bg: 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200' },
+                    { type: 'weather', emoji: '🌧️', label: 'Weather Delay', bg: 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200' },
+                  ].map(({ type, emoji, label, bg }) => (
+                    <button
+                      key={type}
+                      onClick={() => setMessageText(getMessageTemplate(type))}
+                      className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-medium transition border touch-manipulation text-left ${bg}`}
+                    >
+                      <span className="mr-1">{emoji}</span>
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               {/* Customer Info Preview */}
-              <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <p className="text-sm text-gray-600 mb-2">Sending to:</p>
-                <div>
-                  <p className="font-semibold text-gray-900">{selectedOrder.shipping_full_name}</p>
-                  <p className="text-sm text-gray-600">{selectedOrder.shipping_email}</p>
-                </div>
+              <div className="p-3 sm:p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-xs sm:text-sm text-gray-500 mb-1 font-medium uppercase tracking-wide">Sending to</p>
+                <p className="font-semibold text-gray-900 text-sm sm:text-base">{selectedOrder.shipping_full_name}</p>
+                <p className="text-xs sm:text-sm text-gray-500 truncate">{selectedOrder.shipping_email}</p>
               </div>
 
+              {/* Error Message */}
               {messageError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-700">{messageError}</p>
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <p className="text-xs sm:text-sm text-red-700 font-medium">{messageError}</p>
                 </div>
               )}
 
-              {/* Message Input */}
+              {/* Message Textarea */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Your Message
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold text-gray-700">Your Message</label>
+                  <span className={`text-xs font-medium ${messageText.length > 900 ? 'text-red-500' : 'text-gray-400'}`}>
+                    {messageText.length}/1000
+                  </span>
+                </div>
                 <textarea
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Type your message to the buyer here... You can use the quick templates above or write your own custom message."
-                  className="w-full h-48 px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none"
+                  placeholder="Type your message to the buyer here... Or use the quick templates above."
+                  className="w-full h-36 sm:h-44 px-3 sm:px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition resize-none text-sm sm:text-base leading-relaxed"
                   disabled={sendingMessage}
                   maxLength={1000}
                 />
-                <p className="text-sm text-gray-500 mt-2">
-                  {messageText.length} / 1000 characters
-                </p>
               </div>
 
-              {/* Info Box */}
-              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>💡 Tip:</strong> Clear communication helps build trust with your customers. Keep them informed about any changes or updates to their order.
+              {/* Tip Box */}
+              <div className="p-3 sm:p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
+                  <strong>💡 Tip:</strong> Clear communication helps build trust. Keep buyers informed about any changes to their order.
                 </p>
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-200">
+            {/* Modal Footer — sticky at bottom, never scrolls away */}
+            <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 flex gap-2 sm:gap-3 border-t border-gray-200 flex-shrink-0">
               <button
-                onClick={() => {
-                  setShowMessageModal(false);
-                  setMessageText('');
-                  setMessageError('');
-                }}
+                onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }}
                 disabled={sendingMessage}
-                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-semibold disabled:opacity-50"
+                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 active:bg-gray-200 transition font-semibold text-sm sm:text-base disabled:opacity-50 touch-manipulation"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSendMessage}
                 disabled={!messageText.trim() || sendingMessage}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 active:from-blue-800 active:to-blue-900 transition font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg touch-manipulation"
               >
                 {sendingMessage ? (
                   <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                    Sending...
+                    <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-2 border-white border-t-transparent flex-shrink-0" />
+                    <span>Sending...</span>
                   </>
                 ) : (
                   <>
-                    <Send className="w-5 h-5" />
-                    Send Message
+                    <Send className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <span>Send Message</span>
                   </>
                 )}
               </button>
