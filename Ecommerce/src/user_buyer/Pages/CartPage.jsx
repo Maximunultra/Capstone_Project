@@ -15,7 +15,9 @@ const CartPage = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
-
+  // Reusable confirm modal
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  // confirmDialog shape: { message, subMessage, confirmLabel, onConfirm, danger }
   // Which seller's group is selected for checkout (seller_id string or null)
   const [selectedSellerId, setSelectedSellerId] = useState(null);
 
@@ -115,24 +117,31 @@ const CartPage = ({ userId }) => {
     }
   };
 
-  const removeFromCart = async (cartItemId) => {
-    if (!window.confirm('Remove this item from your cart?')) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/cart/${cartItemId}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Failed to remove item');
+ const removeFromCart = async (cartItemId) => {
+  setConfirmDialog({
+    message: 'Remove this item?',
+    subMessage: 'This item will be removed from your cart.',
+    confirmLabel: 'Remove',
+    danger: true,
+    onConfirm: async () => {
+      setConfirmDialog(null);
+      try {
+        const response = await fetch(`${API_BASE_URL}/cart/${cartItemId}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Failed to remove item');
+        }
+        setCartItems(prev => prev.filter(i => i.id !== cartItemId));
+        const remaining = cartItems.filter(i => i.id !== cartItemId);
+        const groups = {};
+        remaining.forEach(i => { groups[i.product?.user_id] = true; });
+        if (selectedSellerId && !groups[selectedSellerId]) setSelectedSellerId(null);
+      } catch (err) {
+        alert('Error removing item: ' + err.message);
       }
-      setCartItems(prev => prev.filter(i => i.id !== cartItemId));
-      // Clear selected seller if their group is now empty
-      const remaining = cartItems.filter(i => i.id !== cartItemId);
-      const groups = {};
-      remaining.forEach(i => { groups[i.product?.user_id] = true; });
-      if (selectedSellerId && !groups[selectedSellerId]) setSelectedSellerId(null);
-    } catch (err) {
-      alert('Error removing item: ' + err.message);
     }
-  };
+  });
+};
 
   // ─── Price helpers ───────────────────────────────────────────────
   const getItemPrice = (item) => {
@@ -182,22 +191,42 @@ const CartPage = ({ userId }) => {
 
   // ─── Checkout ───────────────────────────────────────────────────
   const handleCheckout = () => {
-    if (cartItems.length === 0) { alert('Your cart is empty'); return; }
+  if (cartItems.length === 0) {
+    setConfirmDialog({
+      message: 'Your cart is empty',
+      subMessage: 'Add some products before checking out.',
+      confirmLabel: 'Browse Products',
+      danger: false,
+      onConfirm: () => { setConfirmDialog(null); navigate('/buyer/products'); }
+    });
+    return;
+  }
 
-    if (hasMultipleSellers && !selectedSellerId) {
-      alert('You have products from multiple sellers.\nPlease select one seller group to checkout.');
-      return;
-    }
+  if (hasMultipleSellers && !selectedSellerId) {
+    setConfirmDialog({
+      message: 'No seller selected',
+      subMessage: 'You have products from multiple sellers. Please select one seller group to checkout.',
+      confirmLabel: 'OK',
+      danger: false,
+      onConfirm: () => setConfirmDialog(null)
+    });
+    return;
+  }
 
-    if (hasChanges) {
-      alert('Please update your cart before proceeding to checkout.');
-      return;
-    }
+  if (hasChanges) {
+    setConfirmDialog({
+      message: 'Unsaved changes',
+      subMessage: 'Please update your cart before proceeding to checkout.',
+      confirmLabel: 'OK',
+      danger: false,
+      onConfirm: () => setConfirmDialog(null)
+    });
+    return;
+  }
 
-    // Pass selected seller's items to checkout via location state
-    const itemsToCheckout = hasMultipleSellers ? selectedItems : cartItems;
-    navigate('/buyer/checkout', { state: { checkoutItems: itemsToCheckout, sellerId: selectedSellerId } });
-  };
+  const itemsToCheckout = hasMultipleSellers ? selectedItems : cartItems;
+  navigate('/buyer/checkout', { state: { checkoutItems: itemsToCheckout, sellerId: selectedSellerId } });
+};
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
@@ -211,6 +240,61 @@ const CartPage = ({ userId }) => {
   // ─── Render helpers ──────────────────────────────────────────────
   const renderCartItem = (item) => (
     <div key={item.id} className="p-6 hover:bg-gray-50/50 transition group">
+      {/* ── Reusable Confirm Dialog ── */}
+{confirmDialog && (
+  <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
+
+      {/* Icon header */}
+      <div className={`px-6 py-5 flex items-start gap-4 border-b ${confirmDialog.danger ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'}`}>
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${confirmDialog.danger ? 'bg-red-100' : 'bg-blue-100'}`}>
+          {confirmDialog.danger ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+        </div>
+        <div>
+          <h3 className={`font-bold text-base ${confirmDialog.danger ? 'text-red-900' : 'text-blue-900'}`}>
+            {confirmDialog.message}
+          </h3>
+          {confirmDialog.subMessage && (
+            <p className={`text-sm mt-1 ${confirmDialog.danger ? 'text-red-700' : 'text-blue-700'}`}>
+              {confirmDialog.subMessage}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div className="px-6 py-4 flex gap-3 justify-end">
+        {/* Only show Cancel for destructive/confirm actions, not for info-only dialogs */}
+        {confirmDialog.danger && (
+          <button
+            onClick={() => setConfirmDialog(null)}
+            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition font-medium text-sm"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          onClick={confirmDialog.onConfirm}
+          className={`px-5 py-2 rounded-lg text-white font-semibold text-sm transition ${
+            confirmDialog.danger
+              ? 'bg-red-600 hover:bg-red-700'
+              : 'bg-blue-600 hover:bg-blue-700'
+          }`}
+        >
+          {confirmDialog.confirmLabel}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       <div className="flex gap-4">
         {/* Image */}
         <div
