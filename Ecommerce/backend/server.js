@@ -28,7 +28,7 @@ import paymentRoutes from "./routes/payment.js";
 import messageRoutes from "./routes/messages.js"; // NEW: Message routes
 import feedbackRoutes from './routes/feedback.js';
 import adminAnalyticsRoutes from './routes/admin-analytics.js';
-
+import protectedRoutes from "./routes/protected.js"; 
 // Routes
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/feedback', feedbackRoutes);
@@ -40,7 +40,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/promotions", promotionRoutes);
 app.use("/api/payment", paymentRoutes);
-app.use("/api/messages", messageRoutes); // NEW: Message routes
+app.use("/api/messages", messageRoutes);
+app.use("/api/protected", protectedRoutes);
 // Email transporter setup
 const transporter = nodemailer.createTransport({
   service: 'gmail',

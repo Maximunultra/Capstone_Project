@@ -2,107 +2,52 @@ import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { supabase } from "../server.js";
-
+import crypto from "crypto";
 const router = express.Router();
 
 // Enhanced login route with debugging and seller approval check
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    
-    console.log("Login attempt for email:", email);
-
-    if (!email || !password) {
-      console.log("Missing email or password");
+    if (!email || !password)
       return res.status(400).json({ error: "Email and password are required" });
-    }
 
-    // Find user by email
     const { data: user, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("email", email)
-      .single();
+      .from("users").select("*").eq("email", email).single();
 
-    console.log("Supabase query result:", { user: user ? "found" : "not found", error });
-
-    if (error) {
-      console.log("Supabase error:", error);
+    if (error || !user)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
-    if (!user) {
-      console.log("No user found for email:", email);
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    console.log("User found, checking password...");
-    console.log("Stored hash exists:", !!user.password_hash);
-
-    // Check password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    console.log("Password valid:", isValidPassword);
-    
-    if (!isValidPassword) {
-      console.log("Invalid password for user:", email);
+    if (!isValidPassword)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
-    // ✅ Check if seller is approved
     if (user.role === 'seller' && user.approval_status !== 'approved') {
-      console.log("Seller not approved:", email, "Status:", user.approval_status);
-      
       const statusMessages = {
-        pending: "Your seller account is pending approval. Please wait for admin verification.",
-        rejected: "Your seller account has been rejected. Please contact support for more information."
+        pending: "Your seller account is pending approval.",
+        rejected: "Your seller account has been rejected."
       };
-      
-      return res.status(403).json({ 
-        error: statusMessages[user.approval_status] || "Your seller account is not approved yet."
+      return res.status(403).json({
+        error: statusMessages[user.approval_status] || "Account not approved."
       });
     }
 
-    // ✅ NEW: Check seller approval status
-    if (user.role === 'seller' && user.approval_status !== 'approved') {
-      console.log("Seller not approved:", email, "Status:", user.approval_status);
-      
-      if (user.approval_status === 'pending') {
-        return res.status(403).json({ 
-          error: "Your seller account is pending approval. Please wait for admin verification.",
-          status: "pending"
-        });
-      } else if (user.approval_status === 'rejected') {
-        return res.status(403).json({ 
-          error: "Your seller account application was rejected. Please contact support for more information.",
-          status: "rejected"
-        });
-      } else {
-        return res.status(403).json({ 
-          error: "Your seller account is not approved. Please contact support.",
-          status: user.approval_status
-        });
-      }
-    }
+    // ✅ Generate unique session token & save to DB (kicks out old device)
+    const sessionToken = crypto.randomUUID();
 
-    // Generate JWT token
+    await supabase
+      .from("users")
+      .update({ session_token: sessionToken })
+      .eq("id", user.id);
+
     const token = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email, 
-        role: user.role 
-      },
+      { userId: user.id, email: user.email, role: user.role, sessionToken },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "24h" }
     );
 
-    // Remove password_hash from response
-    const { password_hash, ...userWithoutPassword } = user;
-
-    console.log("Login successful for:", email);
-    res.json({
-      token,
-      user: userWithoutPassword
-    });
+    const { password_hash, session_token, ...userWithoutPassword } = user;
+    res.json({ token, user: userWithoutPassword });
 
   } catch (error) {
     console.error("Login error:", error);

@@ -6,220 +6,165 @@ import { supabase } from "../server.js";
 const router = express.Router();
 
 // ─────────────────────────────────────────
-// Middleware to get seller_id from JWT token
+// Middleware: verify seller JWT
 // ─────────────────────────────────────────
 const getSellerId = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    if (!authHeader)
       return res.status(401).json({ success: false, error: "No authorization token provided" });
-    }
 
     const token = authHeader.replace("Bearer ", "");
-
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
-    } catch (jwtError) {
+    } catch {
       return res.status(401).json({ success: false, error: "Invalid or expired token" });
     }
 
     const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("id, role")
-      .eq("id", decoded.userId)
-      .single();
+      .from("users").select("id, role").eq("id", decoded.userId).single();
 
-    if (userError || !userData) {
+    if (userError || !userData)
       return res.status(401).json({ success: false, error: "User not found" });
-    }
-
-    if (userData.role !== "seller" && userData.role !== "sellers") {
+    if (userData.role !== "seller" && userData.role !== "sellers")
       return res.status(403).json({ success: false, error: "Access denied. Seller account required." });
-    }
 
-    req.sellerId = userData.id; // This is a UUID matching product.user_id
+    req.sellerId = userData.id;
     req.userRole = userData.role;
     next();
   } catch (error) {
-    console.error("Auth middleware error:", error);
     res.status(500).json({ success: false, error: "Authentication failed" });
   }
 };
-
 router.use(getSellerId);
 
 // ─────────────────────────────────────────
-// HELPER: get date range strings
+// HELPERS
 // ─────────────────────────────────────────
-const getMonthRange = (year, month) => {
-  const start = `${year}-${String(month).padStart(2, "0")}-01`;
-  const end = month === 12
-    ? `${year + 1}-01-01`
-    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
-  return { start, end };
+
+/**
+ * Parse ?startDate & ?endDate from query.
+ * Client sends inclusive endDate (e.g. Feb 28) → we make it exclusive (+1 day).
+ * Falls back to current calendar month.
+ */
+const parseDateRange = (query) => {
+  const now = new Date();
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const defaultEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
+
+  const startDate = query.startDate || defaultStart;
+  const endDate   = query.endDate
+    ? (() => { const d = new Date(query.endDate); d.setDate(d.getDate() + 1); return d.toISOString().split("T")[0]; })()
+    : defaultEnd;
+
+  return { startDate, endDate };
 };
 
-// ─────────────────────────────────────────
-// HELPER: get seller's product IDs
-// FIX: product table uses user_id (uuid), not seller_id
-// ─────────────────────────────────────────
+/** Equal-length prior period for growth % comparison */
+const getPriorRange = (startDate, endDate) => {
+  const diffMs   = new Date(endDate) - new Date(startDate);
+  const priorEnd = new Date(startDate);
+  const priorStart = new Date(new Date(startDate).getTime() - diffMs);
+  return { priorStart: priorStart.toISOString().split("T")[0], priorEnd: priorEnd.toISOString().split("T")[0] };
+};
+
+/** Monday of the ISO week containing `date` */
+const getWeekMonday = (date) => {
+  const d = new Date(date);
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() - day + 1);
+  return d.toISOString().split("T")[0];
+};
+
+/** product.user_id is the seller reference */
 const getSellerProductIds = async (sellerId) => {
-  const { data: products, error } = await supabase
-    .from("product")
-    .select("id")
-    .eq("user_id", sellerId); // ✅ correct column: user_id
-
-  if (error) {
-    console.error("Error fetching seller products:", error);
-    return [];
-  }
-  return (products || []).map(p => p.id);
+  const { data } = await supabase.from("product").select("id").eq("user_id", sellerId);
+  return (data || []).map(p => p.id);
 };
 
-// ─────────────────────────────────────────
-// HELPER: get delivered order IDs for a date range
-// from a list of order_ids
-// ─────────────────────────────────────────
-const getDeliveredOrderIds = async (orderIds, dateStart, dateEnd) => {
-  if (!orderIds || orderIds.length === 0) return [];
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id")
-    .in("id", orderIds)
-    .eq("order_status", "delivered")
-    .gte("order_date", dateStart)
-    .lt("order_date", dateEnd);
-  return (orders || []).map(o => o.id);
+/** Delivered orders from a list of IDs within a date range */
+const getDeliveredOrders = async (orderIds, startDate, endDate, select = "id") => {
+  if (!orderIds.length) return [];
+  const { data } = await supabase
+    .from("orders").select(select)
+    .in("id", orderIds).eq("order_status", "delivered")
+    .gte("order_date", startDate).lt("order_date", endDate);
+  return data || [];
+};
+
+/** Top category live from order_items (analytics_category has no seller_id) */
+const getTopCategoryLive = async (sellerProductIds, startDate, endDate) => {
+  if (!sellerProductIds.length) return "N/A";
+  const { data: items } = await supabase
+    .from("order_items").select("product_category, quantity, order_id")
+    .in("product_id", sellerProductIds);
+  if (!items?.length) return "N/A";
+  const orderIds = [...new Set(items.map(i => i.order_id))];
+  const delivered = await getDeliveredOrders(orderIds, startDate, endDate);
+  const deliveredIds = new Set(delivered.map(o => String(o.id)));
+  const catMap = {};
+  items.filter(i => deliveredIds.has(String(i.order_id))).forEach(i => {
+    const cat = i.product_category || "Uncategorized";
+    catMap[cat] = (catMap[cat] || 0) + i.quantity;
+  });
+  return Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
 };
 
 // ─────────────────────────────────────────
 // GET /api/analytics/summary
+// Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
 // ─────────────────────────────────────────
 router.get("/summary", async (req, res) => {
   try {
-    const sellerId = req.sellerId;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
-    const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+    const { startDate, endDate } = parseDateRange(req.query);
+    const { priorStart, priorEnd } = getPriorRange(startDate, endDate);
+    const sellerProductIds = await getSellerProductIds(req.sellerId);
 
-    const current = getMonthRange(currentYear, currentMonth);
-    const last = getMonthRange(lastMonthYear, lastMonth);
+    const empty = {
+      totalRevenue: "0.00", revenueGrowth: "0.0", productsSold: 0,
+      avgOrderValue: "0.00", avgOrderChange: "0.0", topCategory: "N/A",
+      dateRange: { startDate, endDate }
+    };
+    if (!sellerProductIds.length) return res.json({ success: true, stats: empty });
 
-    // ── Try analytics_seller table first ──
-    // analytics_seller.seller_id references users.id ✅
-    const { data: cachedCurrent } = await supabase
-      .from("analytics_seller")
-      .select("total_revenue, total_orders, items_sold, average_order_value")
-      .eq("seller_id", sellerId)
-      .eq("period_type", "monthly")
-      .gte("period_start", current.start)
-      .lt("period_start", current.end)
-      .single();
-
-    const { data: cachedLast } = await supabase
-      .from("analytics_seller")
-      .select("total_revenue, total_orders, average_order_value")
-      .eq("seller_id", sellerId)
-      .eq("period_type", "monthly")
-      .gte("period_start", last.start)
-      .lt("period_start", current.start)
-      .single();
-
-    if (cachedCurrent) {
-      const totalRevenue = parseFloat(cachedCurrent.total_revenue);
-      const lastRevenue = cachedLast ? parseFloat(cachedLast.total_revenue) : 0;
-      const currentAOV = parseFloat(cachedCurrent.average_order_value || 0);
-      const lastAOV = cachedLast ? parseFloat(cachedLast.average_order_value || 0) : 0;
-      const revenueGrowth = lastRevenue > 0 ? ((totalRevenue - lastRevenue) / lastRevenue) * 100 : 0;
-      const avgOrderChange = lastAOV > 0 ? ((currentAOV - lastAOV) / lastAOV) * 100 : 0;
-
-      // analytics_category has no seller_id, so get top category from live data
-      const sellerProductIds = await getSellerProductIds(sellerId);
-      const topCategory = await getTopCategoryLive(sellerProductIds, current.start, current.end);
-
-      return res.json({
-        success: true,
-        stats: {
-          totalRevenue: totalRevenue.toFixed(2),
-          revenueGrowth: revenueGrowth.toFixed(1),
-          productsSold: cachedCurrent.items_sold || 0,
-          avgOrderValue: currentAOV.toFixed(2),
-          avgOrderChange: avgOrderChange.toFixed(1),
-          topCategory
-        }
-      });
-    }
-
-    // ── Fallback: calculate live from orders ──
-    const sellerProductIds = await getSellerProductIds(sellerId);
-
-    if (sellerProductIds.length === 0) {
-      return res.json({
-        success: true,
-        stats: {
-          totalRevenue: "0.00", revenueGrowth: "0.0",
-          productsSold: 0, avgOrderValue: "0.00",
-          avgOrderChange: "0.0", topCategory: "N/A"
-        }
-      });
-    }
-
-    // Get all order items for this seller's products
     const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("quantity, unit_price, product_category, order_id, product_id")
+      .from("order_items").select("quantity, unit_price, product_category, order_id")
       .in("product_id", sellerProductIds);
-
-    if (!orderItems || orderItems.length === 0) {
-      return res.json({
-        success: true,
-        stats: {
-          totalRevenue: "0.00", revenueGrowth: "0.0",
-          productsSold: 0, avgOrderValue: "0.00",
-          avgOrderChange: "0.0", topCategory: "N/A"
-        }
-      });
-    }
+    if (!orderItems?.length) return res.json({ success: true, stats: empty });
 
     const allOrderIds = [...new Set(orderItems.map(i => i.order_id))];
 
-    // Current month delivered orders
-    const currentDeliveredIds = await getDeliveredOrderIds(allOrderIds, current.start, current.end);
-    const currentItems = orderItems.filter(i => currentDeliveredIds.includes(i.order_id));
+    // Current period
+    const currentOrders  = await getDeliveredOrders(allOrderIds, startDate, endDate);
+    const currentIds     = new Set(currentOrders.map(o => String(o.id)));
+    const currentItems   = orderItems.filter(i => currentIds.has(String(i.order_id)));
+    const productsSold   = currentItems.reduce((s, i) => s + i.quantity, 0);
+    const totalRevenue   = currentItems.reduce((s, i) => s + i.quantity * parseFloat(i.unit_price), 0);
+    const avgOrderValue  = currentIds.size > 0 ? totalRevenue / currentIds.size : 0;
 
-    const productsSold = currentItems.reduce((s, i) => s + i.quantity, 0);
-    const totalRevenue = currentItems.reduce((s, i) => s + (i.quantity * parseFloat(i.unit_price)), 0);
-    const avgOrderValue = currentDeliveredIds.length > 0 ? totalRevenue / currentDeliveredIds.length : 0;
+    // Prior period
+    const priorOrders   = await getDeliveredOrders(allOrderIds, priorStart, priorEnd);
+    const priorIds      = new Set(priorOrders.map(o => String(o.id)));
+    const priorItems    = orderItems.filter(i => priorIds.has(String(i.order_id)));
+    const priorRevenue  = priorItems.reduce((s, i) => s + i.quantity * parseFloat(i.unit_price), 0);
+    const priorAOV      = priorIds.size > 0 ? priorRevenue / priorIds.size : 0;
 
-    // Last month delivered orders
-    const lastDeliveredIds = await getDeliveredOrderIds(allOrderIds, last.start, current.start);
-    const lastItems = orderItems.filter(i => lastDeliveredIds.includes(i.order_id));
-    const lastRevenue = lastItems.reduce((s, i) => s + (i.quantity * parseFloat(i.unit_price)), 0);
-    const lastAOV = lastDeliveredIds.length > 0 ? lastRevenue / lastDeliveredIds.length : 0;
+    const revenueGrowth  = priorRevenue > 0 ? ((totalRevenue - priorRevenue) / priorRevenue) * 100 : 0;
+    const avgOrderChange = priorAOV > 0 ? ((avgOrderValue - priorAOV) / priorAOV) * 100 : 0;
 
-    const revenueGrowth = lastRevenue > 0 ? ((totalRevenue - lastRevenue) / lastRevenue) * 100 : 0;
-    const avgOrderChange = lastAOV > 0 ? ((avgOrderValue - lastAOV) / lastAOV) * 100 : 0;
-
-    // Top category from current month
+    // Top category
     const catMap = {};
-    currentItems.forEach(i => {
-      const cat = i.product_category || "Uncategorized";
-      catMap[cat] = (catMap[cat] || 0) + i.quantity;
-    });
-    const topCategory = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+    currentItems.forEach(i => { const c = i.product_category || "Uncategorized"; catMap[c] = (catMap[c]||0) + i.quantity; });
+    const topCategory = Object.entries(catMap).sort((a,b) => b[1]-a[1])[0]?.[0] || "N/A";
 
     res.json({
       success: true,
       stats: {
-        totalRevenue: totalRevenue.toFixed(2),
-        revenueGrowth: revenueGrowth.toFixed(1),
-        productsSold,
-        avgOrderValue: avgOrderValue.toFixed(2),
-        avgOrderChange: avgOrderChange.toFixed(1),
-        topCategory
+        totalRevenue: totalRevenue.toFixed(2), revenueGrowth: revenueGrowth.toFixed(1),
+        productsSold, avgOrderValue: avgOrderValue.toFixed(2),
+        avgOrderChange: avgOrderChange.toFixed(1), topCategory,
+        dateRange: { startDate, endDate }
       }
     });
   } catch (error) {
@@ -228,160 +173,151 @@ router.get("/summary", async (req, res) => {
   }
 });
 
-// Helper: get top category live (analytics_category has no seller_id so we compute from order_items)
-async function getTopCategoryLive(sellerProductIds, dateStart, dateEnd) {
-  if (!sellerProductIds.length) return "N/A";
-  const { data: orderItems } = await supabase
-    .from("order_items")
-    .select("product_category, quantity, order_id")
-    .in("product_id", sellerProductIds);
-  if (!orderItems || !orderItems.length) return "N/A";
-  const orderIds = [...new Set(orderItems.map(i => i.order_id))];
-  const deliveredIds = await getDeliveredOrderIds(orderIds, dateStart, dateEnd);
-  const catMap = {};
-  orderItems.filter(i => deliveredIds.includes(i.order_id)).forEach(i => {
-    const cat = i.product_category || "Uncategorized";
-    catMap[cat] = (catMap[cat] || 0) + i.quantity;
-  });
-  return Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
-}
-
 // ─────────────────────────────────────────
-// GET /api/analytics/sales-by-month?year=2025
+// GET /api/analytics/sales-by-period
+// Query: ?groupBy=month|week  &year=YYYY  &startDate=  &endDate=
+//   month → 12 bars for selected year (same as old sales-by-month)
+//   week  → one bar per ISO week within the date range
 // ─────────────────────────────────────────
-router.get("/sales-by-month", async (req, res) => {
+router.get("/sales-by-period", async (req, res) => {
   try {
-    const sellerId = req.sellerId;
-    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const groupBy = req.query.groupBy || "month";
+    const sellerProductIds = await getSellerProductIds(req.sellerId);
     const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-    // FIX: product.user_id = sellerId
-    const sellerProductIds = await getSellerProductIds(sellerId);
+    if (!sellerProductIds.length)
+      return res.json({ success: true, groupBy, data: groupBy === "month" ? monthNames.map(m => ({ month: m, revenue: 0, orders: 0, customers: 0 })) : [] });
 
-    if (sellerProductIds.length === 0) {
-      return res.json({
-        success: true,
-        data: monthNames.map(month => ({ month, revenue: 0, orders: 0, customers: 0 }))
-      });
-    }
-
-    // Get all order items for seller's products
     const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("product_id, quantity, unit_price, order_id")
+      .from("order_items").select("product_id, quantity, unit_price, order_id")
       .in("product_id", sellerProductIds);
 
-    if (!orderItems || orderItems.length === 0) {
-      return res.json({
-        success: true,
-        data: monthNames.map(month => ({ month, revenue: 0, orders: 0, customers: 0 }))
-      });
-    }
+    if (!orderItems?.length)
+      return res.json({ success: true, groupBy, data: groupBy === "month" ? monthNames.map(m => ({ month: m, revenue: 0, orders: 0, customers: 0 })) : [] });
 
-    // Get delivered orders for the year
     const orderIds = [...new Set(orderItems.map(i => i.order_id))];
-    const { data: orders } = await supabase
-      .from("orders")
-      .select("id, order_date, user_id")
-      .in("id", orderIds)
-      .eq("order_status", "delivered")
-      .gte("order_date", `${year}-01-01`)
-      .lt("order_date", `${year + 1}-01-01`);
 
-    const deliveredOrderIds = new Set((orders || []).map(o => o.id));
-    const orderMap = {};
-    (orders || []).forEach(o => { orderMap[o.id] = o; });
+    if (groupBy === "month") {
+      const year = parseInt(req.query.year) || new Date().getFullYear();
+      const { data: orders } = await supabase
+        .from("orders").select("id, order_date, user_id").in("id", orderIds)
+        .eq("order_status", "delivered")
+        .gte("order_date", `${year}-01-01`).lt("order_date", `${year+1}-01-01`);
 
-    // Aggregate by month
-    const buckets = monthNames.map(name => ({
-      month: name,
-      revenue: 0,
-      orders: new Set(),
-      customers: new Set()
-    }));
+      const orderMap = {}; (orders||[]).forEach(o => { orderMap[String(o.id)] = o; });
+      const deliveredSet = new Set((orders||[]).map(o => String(o.id)));
+      const buckets = monthNames.map(m => ({ month: m, revenue: 0, orders: new Set(), customers: new Set() }));
 
-    orderItems
-      .filter(i => deliveredOrderIds.has(i.order_id))
-      .forEach(i => {
-        const order = orderMap[i.order_id];
-        if (!order) return;
-        const m = new Date(order.order_date).getMonth();
+      orderItems.filter(i => deliveredSet.has(String(i.order_id))).forEach(i => {
+        const o = orderMap[String(i.order_id)]; if (!o) return;
+        const m = new Date(o.order_date).getMonth();
         buckets[m].revenue += i.quantity * parseFloat(i.unit_price);
         buckets[m].orders.add(i.order_id);
-        buckets[m].customers.add(order.user_id);
+        buckets[m].customers.add(o.user_id);
       });
 
-    res.json({
-      success: true,
-      data: buckets.map(b => ({
-        month: b.month,
+      return res.json({ success: true, groupBy: "month", data: buckets.map(b => ({ month: b.month, revenue: Math.round(b.revenue), orders: b.orders.size, customers: b.customers.size })) });
+    }
+
+    // ── Weekly ──
+    const { startDate, endDate } = parseDateRange(req.query);
+    const { data: orders } = await supabase
+      .from("orders").select("id, order_date, user_id").in("id", orderIds)
+      .eq("order_status", "delivered")
+      .gte("order_date", startDate).lt("order_date", endDate);
+
+    const orderMap = {}; (orders||[]).forEach(o => { orderMap[String(o.id)] = o; });
+    const deliveredSet = new Set((orders||[]).map(o => String(o.id)));
+
+    const weekMap = {};
+    orderItems.filter(i => deliveredSet.has(String(i.order_id))).forEach(i => {
+      const o = orderMap[String(i.order_id)]; if (!o) return;
+      const monday = getWeekMonday(o.order_date);
+      if (!weekMap[monday]) weekMap[monday] = { revenue: 0, orders: new Set(), customers: new Set() };
+      weekMap[monday].revenue += i.quantity * parseFloat(i.unit_price);
+      weekMap[monday].orders.add(i.order_id);
+      weekMap[monday].customers.add(o.user_id);
+    });
+
+    const data = Object.entries(weekMap).sort(([a],[b]) => new Date(a)-new Date(b)).map(([monday, b]) => {
+      const d = new Date(monday);
+      return {
+        label: `${d.toLocaleString("default",{month:"short"})} ${String(d.getDate()).padStart(2,"0")}`,
+        week: monday,
         revenue: Math.round(b.revenue),
         orders: b.orders.size,
         customers: b.customers.size
-      }))
+      };
     });
+
+    res.json({ success: true, groupBy: "week", data });
   } catch (error) {
-    console.error("Error /sales-by-month:", error);
+    console.error("Error /sales-by-period:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
+// Backwards-compatible alias
+router.get("/sales-by-month", async (req, res) => {
+  req.query.groupBy = "month";
+  // Re-use sales-by-period logic via internal redirect workaround:
+  // Just inline the month logic here for simplicity
+  try {
+    const sellerProductIds = await getSellerProductIds(req.sellerId);
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    if (!sellerProductIds.length) return res.json({ success: true, data: monthNames.map(m=>({month:m,revenue:0,orders:0,customers:0})) });
+    const { data: orderItems } = await supabase.from("order_items").select("product_id,quantity,unit_price,order_id").in("product_id", sellerProductIds);
+    if (!orderItems?.length) return res.json({ success: true, data: monthNames.map(m=>({month:m,revenue:0,orders:0,customers:0})) });
+    const orderIds = [...new Set(orderItems.map(i=>i.order_id))];
+    const { data: orders } = await supabase.from("orders").select("id,order_date,user_id").in("id",orderIds).eq("order_status","delivered").gte("order_date",`${year}-01-01`).lt("order_date",`${year+1}-01-01`);
+    const orderMap = {}; (orders||[]).forEach(o=>{orderMap[String(o.id)]=o;});
+    const deliveredSet = new Set((orders||[]).map(o=>String(o.id)));
+    const buckets = monthNames.map(m=>({month:m,revenue:0,orders:new Set(),customers:new Set()}));
+    orderItems.filter(i=>deliveredSet.has(String(i.order_id))).forEach(i=>{
+      const o=orderMap[String(i.order_id)]; if(!o) return;
+      const m=new Date(o.order_date).getMonth();
+      buckets[m].revenue+=i.quantity*parseFloat(i.unit_price); buckets[m].orders.add(i.order_id); buckets[m].customers.add(o.user_id);
+    });
+    res.json({ success: true, data: buckets.map(b=>({month:b.month,revenue:Math.round(b.revenue),orders:b.orders.size,customers:b.customers.size})) });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // ─────────────────────────────────────────
 // GET /api/analytics/category-distribution
+// Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
 // ─────────────────────────────────────────
 router.get("/category-distribution", async (req, res) => {
   try {
-    const sellerId = req.sellerId;
-    const now = new Date();
-    const colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981"];
-    const { start, end } = getMonthRange(now.getFullYear(), now.getMonth() + 1);
+    const { startDate, endDate } = parseDateRange(req.query);
+    const colors = ["#3b82f6","#8b5cf6","#ec4899","#f59e0b","#10b981"];
+    const sellerProductIds = await getSellerProductIds(req.sellerId);
+    if (!sellerProductIds.length) return res.json({ success: true, data: [] });
 
-    // FIX: product.user_id = sellerId
-    const sellerProductIds = await getSellerProductIds(sellerId);
-
-    if (sellerProductIds.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    // Get order items for seller's products
     const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("product_category, quantity, unit_price, order_id")
+      .from("order_items").select("product_category, quantity, unit_price, order_id")
       .in("product_id", sellerProductIds);
+    if (!orderItems?.length) return res.json({ success: true, data: [] });
 
-    if (!orderItems || orderItems.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    // Filter to this month's delivered orders
     const orderIds = [...new Set(orderItems.map(i => i.order_id))];
-    const deliveredIds = await getDeliveredOrderIds(orderIds, start, end);
-    const monthItems = orderItems.filter(i => deliveredIds.includes(i.order_id));
+    const delivered = await getDeliveredOrders(orderIds, startDate, endDate);
+    const deliveredIds = new Set(delivered.map(o => String(o.id)));
+    const periodItems = orderItems.filter(i => deliveredIds.has(String(i.order_id)));
+    if (!periodItems.length) return res.json({ success: true, data: [] });
 
-    if (monthItems.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    // Revenue by category
-    const catMap = {};
-    let totalRevenue = 0;
-    monthItems.forEach(i => {
+    const catMap = {}; let total = 0;
+    periodItems.forEach(i => {
       const cat = i.product_category || "Uncategorized";
       const rev = i.quantity * parseFloat(i.unit_price);
-      catMap[cat] = (catMap[cat] || 0) + rev;
-      totalRevenue += rev;
+      catMap[cat] = (catMap[cat]||0) + rev; total += rev;
     });
 
-    const result = Object.entries(catMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([name, revenue], i) => ({
-        name,
-        value: totalRevenue > 0 ? parseFloat(((revenue / totalRevenue) * 100).toFixed(1)) : 0,
-        color: colors[i % colors.length]
-      }));
+    const data = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,rev],idx) => ({
+      name, color: colors[idx%colors.length],
+      value: total > 0 ? parseFloat(((rev/total)*100).toFixed(1)) : 0
+    }));
 
-    res.json({ success: true, data: result });
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Error /category-distribution:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -389,86 +325,54 @@ router.get("/category-distribution", async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// GET /api/analytics/top-products?limit=10
+// GET /api/analytics/top-products
+// Query: ?limit=10&startDate=&endDate=&groupBy=month|week
 // ─────────────────────────────────────────
 router.get("/top-products", async (req, res) => {
   try {
-    const sellerId = req.sellerId;
-    const limit = parseInt(req.query.limit) || 5;
-    const now = new Date();
-    const { start, end } = getMonthRange(now.getFullYear(), now.getMonth() + 1);
+    const limit   = parseInt(req.query.limit) || 10;
+    const groupBy = req.query.groupBy || "month";
+    const { startDate, endDate } = parseDateRange(req.query);
 
-    // FIX: product.user_id = sellerId ✅ (this was already correct in original)
     const { data: sellerProducts } = await supabase
-      .from("product")
-      .select("id, product_name, stock_quantity, price")
-      .eq("user_id", sellerId)
-      .eq("is_active", true);
+      .from("product").select("id, product_name, stock_quantity, price")
+      .eq("user_id", req.sellerId).eq("is_active", true);
 
-    const sellerProductIds = (sellerProducts || []).map(p => p.id);
+    const sellerProductIds = (sellerProducts||[]).map(p => p.id);
+    if (!sellerProductIds.length) return res.json({ success: true, data: [], groupBy });
 
-    if (sellerProductIds.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    const productInfoMap = {};
-    (sellerProducts || []).forEach(p => {
-      productInfoMap[p.id] = {
-        name: p.product_name,
-        stock: p.stock_quantity,
-        price: parseFloat(p.price)
-      };
-    });
+    const infoMap = {};
+    (sellerProducts||[]).forEach(p => { infoMap[p.id] = { name: p.product_name, stock: p.stock_quantity, price: parseFloat(p.price) }; });
 
     const { data: orderItems } = await supabase
-      .from("order_items")
-      .select("product_id, quantity, unit_price, order_id")
+      .from("order_items").select("product_id, quantity, unit_price, order_id")
       .in("product_id", sellerProductIds);
-
-    if (!orderItems || orderItems.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
+    if (!orderItems?.length) return res.json({ success: true, data: [], groupBy });
 
     const orderIds = [...new Set(orderItems.map(i => i.order_id))];
-    const deliveredIds = await getDeliveredOrderIds(orderIds, start, end);
-    const monthItems = orderItems.filter(i => deliveredIds.includes(i.order_id));
-
-    if (monthItems.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
+    const delivered = await getDeliveredOrders(orderIds, startDate, endDate);
+    const deliveredIds = new Set(delivered.map(o => String(o.id)));
+    const periodItems = orderItems.filter(i => deliveredIds.has(String(i.order_id)));
+    if (!periodItems.length) return res.json({ success: true, data: [], groupBy });
 
     const productMap = {};
-    monthItems.forEach(i => {
+    periodItems.forEach(i => {
       if (!productMap[i.product_id]) {
-        const info = productInfoMap[i.product_id];
-        productMap[i.product_id] = {
-          id: i.product_id,
-          name: info?.name || "Unknown Product",
-          stock: info?.stock || 0,
-          price: info?.price || 0,
-          sales: 0,
-          revenue: 0
-        };
+        const info = infoMap[i.product_id];
+        productMap[i.product_id] = { id: i.product_id, name: info?.name||"Unknown", stock: info?.stock||0, price: info?.price||0, sales: 0, revenue: 0 };
       }
-      productMap[i.product_id].sales += i.quantity;
+      productMap[i.product_id].sales   += i.quantity;
       productMap[i.product_id].revenue += i.quantity * parseFloat(i.unit_price);
     });
 
-    const result = Object.values(productMap)
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, limit)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        sales: p.sales,
-        revenue: Math.round(p.revenue),
-        stock: p.stock,
-        price: p.price.toFixed(2),
-        stockStatus: p.stock === 0 ? 'out_of_stock' : p.stock < 10 ? 'low_stock' : 'in_stock',
-        stockStatusLabel: p.stock === 0 ? 'Out of Stock' : p.stock < 10 ? 'Low Stock' : 'In Stock'
-      }));
+    const data = Object.values(productMap).sort((a,b)=>b.revenue-a.revenue).slice(0,limit).map(p => ({
+      id: p.id, name: p.name, sales: p.sales, revenue: Math.round(p.revenue),
+      stock: p.stock, price: p.price.toFixed(2),
+      stockStatus: p.stock===0?"out_of_stock":p.stock<10?"low_stock":"in_stock",
+      stockStatusLabel: p.stock===0?"Out of Stock":p.stock<10?"Low Stock":"In Stock"
+    }));
 
-    res.json({ success: true, data: result });
+    res.json({ success: true, data, groupBy });
   } catch (error) {
     console.error("Error /top-products:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -476,53 +380,37 @@ router.get("/top-products", async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// GET /api/analytics/product-stock
+// GET /api/analytics/product-stock  (always live)
 // ─────────────────────────────────────────
 router.get("/product-stock", async (req, res) => {
   try {
-    const sellerId = req.sellerId;
-    const sortBy = req.query.sortBy || 'stock';
-
-    // FIX: product.user_id = sellerId ✅ (this was already correct in original)
+    const sortBy = req.query.sortBy || "stock";
     const { data: products, error } = await supabase
       .from("product")
       .select("id, product_name, stock_quantity, price, category, product_image, sold_count, is_active")
-      .eq("user_id", sellerId)
-      .order(
-        sortBy === 'name' ? 'product_name' : sortBy === 'price' ? 'price' : 'stock_quantity',
-        { ascending: sortBy === 'stock' }
-      );
+      .eq("user_id", req.sellerId)
+      .order(sortBy==="name"?"product_name":sortBy==="price"?"price":"stock_quantity", { ascending: sortBy==="stock" });
 
     if (error) throw error;
-
     const all = products || [];
 
-    const result = all.map(p => ({
-      id: p.id,
-      name: p.product_name,
-      stock: p.stock_quantity,
-      price: parseFloat(p.price).toFixed(2),
-      category: p.category || 'Uncategorized',
-      image: p.product_image,
-      totalSold: p.sold_count || 0,
-      isActive: p.is_active,
-      stockStatus: p.stock_quantity === 0 ? 'out_of_stock'
-                 : p.stock_quantity < 10  ? 'low_stock'
-                 : 'in_stock',
-      stockStatusLabel: p.stock_quantity === 0 ? 'Out of Stock'
-                      : p.stock_quantity < 10  ? 'Low Stock'
-                      : 'In Stock'
+    const data = all.map(p => ({
+      id: p.id, name: p.product_name, stock: p.stock_quantity,
+      price: parseFloat(p.price).toFixed(2), category: p.category||"Uncategorized",
+      image: p.product_image, totalSold: p.sold_count||0, isActive: p.is_active,
+      stockStatus: p.stock_quantity===0?"out_of_stock":p.stock_quantity<10?"low_stock":"in_stock",
+      stockStatusLabel: p.stock_quantity===0?"Out of Stock":p.stock_quantity<10?"Low Stock":"In Stock"
     }));
 
     const summary = {
-      totalProducts:   all.length,
-      activeProducts:  all.filter(p => p.is_active).length,
-      lowStock:        all.filter(p => p.stock_quantity > 0 && p.stock_quantity < 10).length,
-      outOfStock:      all.filter(p => p.stock_quantity === 0).length,
-      totalValue:      all.reduce((s, p) => s + (p.stock_quantity * parseFloat(p.price)), 0)
+      totalProducts:  all.length,
+      activeProducts: all.filter(p=>p.is_active).length,
+      lowStock:       all.filter(p=>p.stock_quantity>0&&p.stock_quantity<10).length,
+      outOfStock:     all.filter(p=>p.stock_quantity===0).length,
+      totalValue:     all.reduce((s,p)=>s+p.stock_quantity*parseFloat(p.price),0)
     };
 
-    res.json({ success: true, data: result, summary });
+    res.json({ success: true, data, summary });
   } catch (error) {
     console.error("Error /product-stock:", error);
     res.status(500).json({ success: false, error: error.message });
