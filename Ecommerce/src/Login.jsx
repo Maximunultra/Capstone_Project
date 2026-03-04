@@ -87,13 +87,23 @@ export default function Login({ onAuthChange }) {
         showToast('Invalid response from server', 'error');
       }
     } catch (err) {
-      // ✅ Handle seller approval status errors (403)
-      if (err.response?.status === 403) {
-        showToast(err.response?.data?.error || 'Account not approved', 'warning');
-      } else {
-        showToast(err.response?.data?.error || 'Login failed! Please try again.', 'error');
-      }
-    } finally {
+  if (err.response?.status === 403) {
+    showToast(err.response?.data?.error || 'Account not approved', 'warning');
+  
+  // ✅ ADD THIS
+  } else if (
+    err.response?.status === 401 &&
+    err.response?.data?.code === "SESSION_INVALIDATED"
+  ) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    showToast("You were logged out. Account signed in on another device.", "error");
+    setTimeout(() => navigate("/login"), 2000);
+  
+  } else {
+    showToast(err.response?.data?.error || 'Login failed! Please try again.', 'error');
+  }
+} finally {
       setLoading(false);
     }
   };

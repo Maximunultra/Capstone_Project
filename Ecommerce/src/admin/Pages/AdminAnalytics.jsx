@@ -3,6 +3,75 @@ import React, { useState, useEffect } from 'react';
 // const API_BASE_URL = 'http://localhost:5000/api';
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
+// ─── Date Range Utilities ─────────────────────────────────────────────────────
+const fmtDate = (d) => d.toISOString().split("T")[0];
+const lastDay = (y, m) => new Date(y, m + 1, 0);
+const getPresetRange = (preset) => {
+  const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+  switch (preset) {
+    case "this_month":    return { startDate: fmtDate(new Date(y,m,1)),   endDate: fmtDate(lastDay(y,m)) };
+    case "last_month":    return { startDate: fmtDate(new Date(y,m-1,1)), endDate: fmtDate(lastDay(y,m-1)) };
+    case "last_3_months": return { startDate: fmtDate(new Date(y,m-2,1)), endDate: fmtDate(lastDay(y,m)) };
+    case "last_6_months": return { startDate: fmtDate(new Date(y,m-5,1)), endDate: fmtDate(lastDay(y,m)) };
+    case "this_year":     return { startDate: fmtDate(new Date(y,0,1)),   endDate: fmtDate(new Date(y,11,31)) };
+    default:              return { startDate: fmtDate(new Date(y,m,1)),   endDate: fmtDate(lastDay(y,m)) };
+  }
+};
+const PRESETS = [
+  { key: "this_month", label: "This Month" }, { key: "last_month", label: "Last Month" },
+  { key: "last_3_months", label: "Last 3 Months" }, { key: "last_6_months", label: "Last 6 Months" },
+  { key: "this_year", label: "This Year" }, { key: "custom", label: "Custom" },
+];
+
+// ─── Date Range Picker Component ──────────────────────────────────────────────
+const DateRangePicker = ({ startDate, endDate, onRangeChange }) => {
+  const [activePreset, setActivePreset] = useState("this_month");
+  const [showCustom, setShowCustom] = useState(false);
+  const [customStart, setCustomStart] = useState(startDate);
+  const [customEnd, setCustomEnd] = useState(endDate);
+  const handlePreset = (key) => {
+    setActivePreset(key);
+    if (key === "custom") setShowCustom(true);
+    else { setShowCustom(false); onRangeChange(getPresetRange(key)); }
+  };
+  return (
+    <div className="bg-white rounded-xl px-5 py-4 shadow-sm border border-gray-200 mb-6">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">Date Range:</span>
+        <div className="flex flex-wrap gap-1.5">
+          {PRESETS.map(p => (
+            <button key={p.key} onClick={() => handlePreset(p.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${activePreset === p.key ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {!showCustom && <span className="ml-auto text-xs text-gray-400 font-medium">{startDate} → {endDate}</span>}
+      </div>
+      {showCustom && (
+        <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-100">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 font-medium">From:</label>
+            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 font-medium">To:</label>
+            <input type="date" value={customEnd} min={customStart} onChange={e => setCustomEnd(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <button onClick={() => { if (customStart && customEnd && customStart <= customEnd) onRangeChange({ startDate: customStart, endDate: customEnd }); }}
+            disabled={!customStart || !customEnd || customStart > customEnd}
+            className="px-4 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            Apply
+          </button>
+          {customStart && customEnd && <span className="text-xs text-gray-400">{customStart} → {customEnd}</span>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Mini Horizontal Bar Chart Component ────────────────────────────────────
 const HorizontalBar = ({ label, value, maxValue, color, suffix = '', prefix = '' }) => {
   const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
@@ -166,9 +235,12 @@ const ChartTypeBtn = ({ current, value, label, setter }) => (
 
 // ─── Main AdminAnalytics Component ───────────────────────────────────────────
 const AdminAnalytics = () => {
+  const initRange = getPresetRange("this_month");
+  const [dateRange, setDateRange] = useState(initRange);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [salesGroupBy, setSalesGroupBy] = useState('month'); // 'month' | 'week' — must be before useEffect
   const [selectedMetric, setSelectedMetric] = useState('revenue');
   const [paymentView, setPaymentView] = useState('summary');
 
@@ -180,6 +252,8 @@ const AdminAnalytics = () => {
   const [sellerSortBy, setSellerSortBy] = useState('revenue');
   const [productLimit, setProductLimit] = useState(5);
   const [sellerLimit, setSellerLimit] = useState(5);
+  const [productGroupBy, setProductGroupBy] = useState('month'); // 'month' | 'week'
+  const [sellerGroupBy, setSellerGroupBy] = useState('month');   // 'month' | 'week'
 
   const [stats, setStats] = useState({
     totalRevenue: '0', revenueGrowth: '0', productsSold: 0,
@@ -195,25 +269,6 @@ const AdminAnalytics = () => {
   const [sellersPayment, setSellersPayment] = useState([]);
   const [paymentTransactions, setPaymentTransactions] = useState([]);
 
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        await Promise.all([
-          fetchSummary(), fetchSalesData(selectedYear), fetchCategoryData(),
-          fetchTopProducts(), fetchTopSellers(), fetchSellersPayment(), fetchPaymentTransactions()
-        ]);
-      } catch (err) {
-        console.error('Error loading analytics:', err);
-        setError('Failed to load analytics data.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [selectedYear]);
-
   const getAuthToken = () => localStorage.getItem('token');
   const fetchWithAuth = async (url) => {
     const token = getAuthToken();
@@ -224,40 +279,41 @@ const AdminAnalytics = () => {
     return res.json();
   };
 
-  const fetchSummary = async () => {
-    const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/summary`);
-    if (json.success && json.stats) setStats(json.stats);
-  };
-  const fetchSalesData = async (year) => {
-    const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/sales-by-month?year=${year}`);
-    if (json.success && json.data) setSalesData(json.data);
-  };
-  const fetchCategoryData = async () => {
-    const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/category-distribution`);
-    if (json.success && json.data) setCategoryData(json.data);
-  };
-  const fetchTopProducts = async () => {
-    const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/top-products?limit=10`);
-    if (json.success && json.data) setTopProducts(json.data);
-  };
-  const fetchTopSellers = async () => {
-    try {
-      const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/top-sellers?limit=10`);
-      if (json.success && json.data) setTopSellers(json.data);
-    } catch { setTopSellers([]); }
-  };
-  const fetchSellersPayment = async () => {
-    try {
-      const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/sellers-by-payment`);
-      if (json.success && json.data) setSellersPayment(json.data);
-    } catch { setSellersPayment([]); }
-  };
-  const fetchPaymentTransactions = async () => {
-    try {
-      const json = await fetchWithAuth(`${API_BASE_URL}/admin/analytics/payment-transactions`);
-      if (json.success && json.data) setPaymentTransactions(json.data);
-    } catch { setPaymentTransactions([]); }
-  };
+  // Single useEffect — dateParams built INSIDE the effect so all deps are stable
+  useEffect(() => {
+    const dp = `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await Promise.all([
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/summary?${dp}`)
+            .then(j => { if (j.success && j.stats) setStats(j.stats); }),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/sales-by-period?groupBy=${salesGroupBy}&year=${selectedYear}&${dp}`)
+            .then(j => { if (j.success && j.data) setSalesData(j.data); }),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/category-distribution?${dp}`)
+            .then(j => { if (j.success && j.data) setCategoryData(j.data); }),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/top-products?limit=10&${dp}`)
+            .then(j => { if (j.success && j.data) setTopProducts(j.data); }),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/top-sellers?limit=10&${dp}`)
+            .then(j => { if (j.success && j.data) setTopSellers(j.data); })
+            .catch(() => setTopSellers([])),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/sellers-by-payment?${dp}`)
+            .then(j => { if (j.success && j.data) setSellersPayment(j.data); })
+            .catch(() => setSellersPayment([])),
+          fetchWithAuth(`${API_BASE_URL}/admin/analytics/payment-transactions?${dp}`)
+            .then(j => { if (j.success && j.data) setPaymentTransactions(j.data); })
+            .catch(() => setPaymentTransactions([])),
+        ]);
+      } catch (err) {
+        console.error('Error loading analytics:', err);
+        setError('Failed to load analytics data.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    run();
+  }, [dateRange.startDate, dateRange.endDate, salesGroupBy, selectedYear]);
 
   const formatCurrency = (v) => {
     const num = typeof v === 'string' ? parseFloat(v) : v;
@@ -268,11 +324,7 @@ const AdminAnalytics = () => {
     return new Intl.NumberFormat('en-US').format(num || 0);
   };
 
-  const getMaxValue = () => {
-    if (salesData.length === 0) return 1000;
-    return Math.max(...salesData.map((d) => d[selectedMetric] || 0), 1);
-  };
-  const maxValue = getMaxValue();
+  // maxChartValue is now computed below after chartData is defined
   const chartHeight = 300;
   const revenueGrowthNum = parseFloat(stats.revenueGrowth) || 0;
   const currentYear = new Date().getFullYear();
@@ -296,14 +348,23 @@ const AdminAnalytics = () => {
     sellers: '#10b981',
   };
 
+  // ── Week / Month toggle ───────────────────────────────────────────
+
+  // salesData is populated by the real backend for BOTH month and week modes
+  const chartData     = salesData;
+  const getBarLabel   = (d) => salesGroupBy === 'week' ? d.label : d.month;
+  const isScrollable  = salesGroupBy === 'week' && chartData.length > 12;
+  const maxChartValue = chartData.length > 0 ? Math.max(...chartData.map(d => d[selectedMetric] || 0), 1) : 1000;
+
   return (
     <div className="p-8 min-h-screen bg-gray-100">
-      <div className="mb-8">
+      {/* Header */}
+      <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Analytics Dashboard</h1>
         <p className="text-sm text-gray-500">Overview of platform performance and metrics</p>
       </div>
 
-      {error && (
+{error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm font-medium text-red-800">{error}</p>
         </div>
@@ -367,74 +428,80 @@ const AdminAnalytics = () => {
         </div>
       </div>
 
-      {/* Payment Methods */}
+{/* ── Sales Chart ── */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8">
-        <h3 className="text-lg font-semibold text-gray-900 mb-6">Payment Methods</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            { label: 'GCash', orders: stats.gcashOrders, revenue: stats.gcashRevenue, color: '#3b82f6' },
-            { label: 'PayPal', orders: stats.paypalOrders, revenue: stats.paypalRevenue, color: '#6366f1' },
-            { label: 'COD', orders: stats.codOrders, revenue: stats.codRevenue, color: '#f59e0b' },
-          ].map((pm) => (
-            <div key={pm.label} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-semibold text-gray-900">{pm.label}</span>
-                <span className="text-sm text-gray-500">{pm.orders} orders</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(pm.revenue)}</p>
-              <div className="mt-3 w-full bg-gray-100 rounded-full h-1.5">
-                <div className="h-1.5 rounded-full" style={{
-                  width: `${stats.totalOrders > 0 ? (pm.orders / stats.totalOrders) * 100 : 0}%`,
-                  backgroundColor: pm.color
-                }} />
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                {stats.totalOrders > 0 ? ((pm.orders / stats.totalOrders) * 100).toFixed(1) : 0}% of orders
-              </p>
+        <div className="flex flex-wrap justify-between items-start gap-3 mb-6">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Sales Analysis</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {salesGroupBy === 'month' ? `Monthly breakdown for ${selectedYear}` : `Weekly breakdown · ${dateRange.startDate} → ${dateRange.endDate}`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Month / Week toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
+              {[{ v: 'month', l: 'Month' }, { v: 'week', l: 'Week' }].map(opt => (
+                <button key={opt.v} onClick={() => setSalesGroupBy(opt.v)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                    salesGroupBy === opt.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>{opt.l}</button>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Sales Chart */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8">
-        <div className="flex justify-between mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">Sales Analysis</h2>
-          <div className="flex gap-3">
-            <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="px-4 py-2 border rounded-lg text-sm">
-              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
-            </select>
-            <select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="px-4 py-2 border rounded-lg text-sm">
+            {salesGroupBy === 'month' && (
+              <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+            )}
+            <select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white">
               <option value="revenue">Revenue</option>
               <option value="commission">Commission</option>
               <option value="orders">Orders</option>
             </select>
           </div>
         </div>
+
+        {isScrollable && (
+          <div className="flex items-center gap-2 mb-3">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+              </svg>
+              {chartData.length} weeks · scroll horizontally to see all
+            </span>
+          </div>
+        )}
+
         <div className="relative" style={{ height: chartHeight }}>
-          {salesData.length > 0 ? (
+          {chartData.length > 0 ? (
             <>
-              <div className="absolute left-0 top-0 bottom-8 flex flex-col justify-between text-xs text-gray-400" style={{ width: 48 }}>
-                <span>{selectedMetric === 'orders' ? maxValue : `₱${(maxValue / 1000).toFixed(0)}k`}</span>
-                <span>{selectedMetric === 'orders' ? Math.round(maxValue * 0.5) : `₱${((maxValue * 0.5) / 1000).toFixed(0)}k`}</span>
+              <div className="absolute left-0 top-0 bottom-8 flex flex-col justify-between text-xs text-gray-400 z-10 bg-white pr-1" style={{ width: 52 }}>
+                <span>{selectedMetric === 'orders' ? maxChartValue : `₱${(maxChartValue/1000).toFixed(0)}k`}</span>
+                <span>{selectedMetric === 'orders' ? Math.round(maxChartValue*0.5) : `₱${(maxChartValue*0.5/1000).toFixed(0)}k`}</span>
                 <span>{selectedMetric === 'orders' ? '0' : '₱0'}</span>
               </div>
-              <div className="ml-12 h-full flex items-end justify-between gap-1.5 border-b border-l border-gray-200 pb-8 pl-2">
-                {salesData.map((d, i) => {
-                  const value = d[selectedMetric] || 0;
-                  const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center group relative">
-                      <div className="absolute bottom-full mb-1 bg-gray-900 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                        {selectedMetric === 'orders' ? value : formatCurrency(value)}
+              <div className={`ml-14 h-full border-b border-l border-gray-200 pb-8 pl-2 ${isScrollable ? 'overflow-x-auto' : ''}`}>
+                <div className={`h-full flex items-end justify-between gap-1.5 ${isScrollable ? `min-w-[${chartData.length * 36}px]` : ''}`}>
+                  {chartData.map((d, i) => {
+                    const value = d[selectedMetric] || 0;
+                    const pct   = maxChartValue > 0 ? (value / maxChartValue) * 100 : 0;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center group relative" style={isScrollable ? { minWidth: 32 } : {}}>
+                        <div className="absolute bottom-full mb-1 bg-gray-900 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                          <span className="font-semibold">{getBarLabel(d)}</span><br />
+                          {selectedMetric === 'orders' ? value : formatCurrency(value)}
+                        </div>
+                        <div className="relative w-full flex items-end justify-center" style={{ height: chartHeight - 40 }}>
+                          <div className="w-full bg-blue-600 rounded-t-md group-hover:bg-blue-500 transition-colors"
+                            style={{ height: `${pct}%`, minHeight: value > 0 ? '2px' : '0' }} />
+                        </div>
+                        <span className={`text-gray-500 mt-1 text-center leading-tight ${isScrollable ? 'text-[9px]' : 'text-xs mt-2'}`}
+                          style={isScrollable ? { writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: 28 } : {}}>
+                          {getBarLabel(d)}
+                        </span>
                       </div>
-                      <div className="relative w-full flex items-end justify-center" style={{ height: chartHeight - 40 }}>
-                        <div className="w-full bg-blue-600 rounded-t-md group-hover:bg-blue-500 transition-colors" style={{ height: `${pct}%`, minHeight: value > 0 ? '2px' : '0' }} />
-                      </div>
-                      <span className="text-xs text-gray-500 mt-2">{d.month}</span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </>
           ) : (
@@ -443,46 +510,61 @@ const AdminAnalytics = () => {
             </div>
           )}
         </div>
+
+
       </div>
+
+{/* ── Date Range Picker ── sits between header and summary cards */}
+      <DateRangePicker
+        startDate={dateRange.startDate}
+        endDate={dateRange.endDate}
+        onRangeChange={setDateRange}
+      />
 
       {/* ── CHARTS: Top Products, Top Sellers, Categories ────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
 
         {/* Top Products */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Products</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Top Products</h3>
+          <p className="text-xs text-gray-400 mb-4">
+            {productGroupBy === 'month' ? `${dateRange.startDate} → ${dateRange.endDate}` : `Weekly · ${dateRange.startDate} → ${dateRange.endDate}`}
+          </p>
 
-          {/* Filters */}
+          {/* Controls */}
           <div className="flex flex-wrap gap-2 mb-5">
             <div className="flex gap-1">
               <ChartTypeBtn current={productChartType} value="horizontal" label="Bar" setter={setProductChartType} />
               <ChartTypeBtn current={productChartType} value="vertical" label="Column" setter={setProductChartType} />
             </div>
-            <select
-              value={productSortBy}
-              onChange={e => setProductSortBy(e.target.value)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600"
-            >
+            {/* Month / Week toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5">
+              {[{ v: 'month', l: 'Month' }, { v: 'week', l: 'Week' }].map(opt => (
+                <button key={opt.v} onClick={() => setProductGroupBy(opt.v)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                    productGroupBy === opt.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>{opt.l}</button>
+              ))}
+            </div>
+            <select value={productSortBy} onChange={e => setProductSortBy(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
               <option value="revenue">By Revenue</option>
               <option value="sales">By Units Sold</option>
             </select>
-            <select
-              value={productLimit}
-              onChange={e => setProductLimit(Number(e.target.value))}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600"
-            >
+            <select value={productLimit} onChange={e => setProductLimit(Number(e.target.value))}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
               <option value={3}>Top 3</option>
               <option value={5}>Top 5</option>
               <option value={10}>Top 10</option>
             </select>
           </div>
 
+
+
           {sortedProducts.length > 0 ? (
             <>
               {productChartType === 'horizontal' && sortedProducts.map((p, i) => (
-                <HorizontalBar
-                  key={i}
-                  label={p.name}
+                <HorizontalBar key={i} label={p.name}
                   value={productSortBy === 'revenue' ? parseFloat(p.revenue) : p.sales}
                   maxValue={productSortBy === 'revenue'
                     ? Math.max(...sortedProducts.map(x => parseFloat(x.revenue)))
@@ -496,14 +578,13 @@ const AdminAnalytics = () => {
                 <VerticalBarChart
                   data={sortedProducts.map(p => ({ ...p, revenue: parseFloat(p.revenue), name: p.name }))}
                   valueKey={productSortBy === 'revenue' ? 'revenue' : 'sales'}
-                  labelKey="name"
-                  color={COLORS.products}
+                  labelKey="name" color={COLORS.products}
                   prefix={productSortBy === 'revenue' ? '₱' : ''}
                   suffix={productSortBy === 'sales' ? ' units' : ''}
                 />
               )}
               <p className="text-xs text-gray-400 text-center mt-4 pt-3 border-t border-gray-100">
-                Showing {sortedProducts.length} products · sorted by {productSortBy}
+                Showing {sortedProducts.length} products · {productGroupBy} view · sorted by {productSortBy}
               </p>
             </>
           ) : (
@@ -513,39 +594,45 @@ const AdminAnalytics = () => {
 
         {/* Top Sellers */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Sellers</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Top Sellers</h3>
+          <p className="text-xs text-gray-400 mb-4">
+            {sellerGroupBy === 'month' ? `${dateRange.startDate} → ${dateRange.endDate}` : `Weekly · ${dateRange.startDate} → ${dateRange.endDate}`}
+          </p>
 
-          {/* Filters */}
+          {/* Controls */}
           <div className="flex flex-wrap gap-2 mb-5">
             <div className="flex gap-1">
               <ChartTypeBtn current={sellerChartType} value="horizontal" label="Bar" setter={setSellerChartType} />
               <ChartTypeBtn current={sellerChartType} value="vertical" label="Column" setter={setSellerChartType} />
             </div>
-            <select
-              value={sellerSortBy}
-              onChange={e => setSellerSortBy(e.target.value)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600"
-            >
+            {/* Month / Week toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5">
+              {[{ v: 'month', l: 'Month' }, { v: 'week', l: 'Week' }].map(opt => (
+                <button key={opt.v} onClick={() => setSellerGroupBy(opt.v)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                    sellerGroupBy === opt.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>{opt.l}</button>
+              ))}
+            </div>
+            <select value={sellerSortBy} onChange={e => setSellerSortBy(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
               <option value="revenue">By Revenue</option>
               <option value="items">By Items Sold</option>
             </select>
-            <select
-              value={sellerLimit}
-              onChange={e => setSellerLimit(Number(e.target.value))}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600"
-            >
+            <select value={sellerLimit} onChange={e => setSellerLimit(Number(e.target.value))}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
               <option value={3}>Top 3</option>
               <option value={5}>Top 5</option>
               <option value={10}>Top 10</option>
             </select>
           </div>
 
+
+
           {sortedSellers.length > 0 ? (
             <>
               {sellerChartType === 'horizontal' && sortedSellers.map((s, i) => (
-                <HorizontalBar
-                  key={i}
-                  label={s.seller_name}
+                <HorizontalBar key={i} label={s.seller_name}
                   value={sellerSortBy === 'revenue' ? parseFloat(s.total_revenue) : s.items_sold}
                   maxValue={sellerSortBy === 'revenue'
                     ? Math.max(...sortedSellers.map(x => parseFloat(x.total_revenue)))
@@ -563,14 +650,13 @@ const AdminAnalytics = () => {
                     name: s.seller_name
                   }))}
                   valueKey={sellerSortBy === 'revenue' ? 'total_revenue' : 'items_sold'}
-                  labelKey="name"
-                  color={COLORS.sellers}
+                  labelKey="name" color={COLORS.sellers}
                   prefix={sellerSortBy === 'revenue' ? '₱' : ''}
                   suffix={sellerSortBy === 'items' ? ' items' : ''}
                 />
               )}
               <p className="text-xs text-gray-400 text-center mt-4 pt-3 border-t border-gray-100">
-                Showing {sortedSellers.length} sellers · sorted by {sellerSortBy}
+                Showing {sortedSellers.length} sellers · {sellerGroupBy} view · sorted by {sellerSortBy}
               </p>
             </>
           ) : (
@@ -580,7 +666,8 @@ const AdminAnalytics = () => {
 
         {/* Categories */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Categories</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Categories</h3>
+          <p className="text-xs text-gray-400 mb-4">{dateRange.startDate} → {dateRange.endDate}</p>
 
           {/* Filters */}
           <div className="flex flex-wrap gap-2 mb-5">
@@ -618,6 +705,35 @@ const AdminAnalytics = () => {
           ) : (
             <p className="text-gray-500 text-sm text-center py-10">No category data available</p>
           )}
+        </div>
+      </div>
+
+      {/* Payment Methods */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8">
+        <h3 className="text-lg font-semibold text-gray-900 mb-6">Payment Methods</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            { label: 'GCash', orders: stats.gcashOrders, revenue: stats.gcashRevenue, color: '#3b82f6' },
+            { label: 'PayPal', orders: stats.paypalOrders, revenue: stats.paypalRevenue, color: '#6366f1' },
+            { label: 'COD', orders: stats.codOrders, revenue: stats.codRevenue, color: '#f59e0b' },
+          ].map((pm) => (
+            <div key={pm.label} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-semibold text-gray-900">{pm.label}</span>
+                <span className="text-sm text-gray-500">{pm.orders} orders</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{formatCurrency(pm.revenue)}</p>
+              <div className="mt-3 w-full bg-gray-100 rounded-full h-1.5">
+                <div className="h-1.5 rounded-full" style={{
+                  width: `${stats.totalOrders > 0 ? (pm.orders / stats.totalOrders) * 100 : 0}%`,
+                  backgroundColor: pm.color
+                }} />
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {stats.totalOrders > 0 ? ((pm.orders / stats.totalOrders) * 100).toFixed(1) : 0}% of orders
+              </p>
+            </div>
+          ))}
         </div>
       </div>
 
