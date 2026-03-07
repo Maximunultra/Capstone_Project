@@ -21,6 +21,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   const location = useLocation();
   const currentPath = location.pathname;
   const [unreadCount, setUnreadCount] = useState(0);
+  const [newOrderCount, setNewOrderCount] = useState(0);
 
   // Get the role prefix from localStorage or props
   const rolePrefix = userRole || JSON.parse(localStorage.getItem("user") || '{}').role || 'buyer';
@@ -29,7 +30,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   const navItems = [
     { to: `/${rolePrefix}/analytics`, label: "Analytics Dashboard", icon: <BarChart4 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
-    { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
+    { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />, hasOrderNotification: true },
     { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />, hasNotification: true },
   ];
@@ -43,7 +44,6 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
       const data = await response.json();
       
       if (data.success && data.conversations) {
-        // Calculate total unread messages from all conversations
         const totalUnread = data.conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
         setUnreadCount(totalUnread);
       }
@@ -52,32 +52,61 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     }
   };
 
-  // Fetch unread count on component mount and set up polling
+  // Fetch new orders count — uses GET /orders?seller_id=...&status=pending
+  const fetchNewOrderCount = async () => {
+    if (!currentUserId) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders?seller_id=${currentUserId}&status=pending`);
+      const data = await response.json();
+
+      if (data.success && data.orders) {
+        // Backend already filters by status=pending, just count them
+        setNewOrderCount(data.orders.length);
+      }
+    } catch (error) {
+      console.error('Error fetching new order count:', error);
+    }
+  };
+
+  // Fetch counts on mount and set up polling
   useEffect(() => {
     fetchUnreadCount();
+    fetchNewOrderCount();
     
-    // Poll for new messages every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000);
+    // Poll for updates every 30 seconds
+    const interval = setInterval(() => {
+      fetchUnreadCount();
+      fetchNewOrderCount();
+    }, 30000);
     
     return () => clearInterval(interval);
   }, [currentUserId]);
 
-  // Refresh unread count when navigating away from messages page
+  // Refresh counts when navigating away from relevant pages
   useEffect(() => {
     if (!currentPath.includes('/messages')) {
       fetchUnreadCount();
     }
+    if (!currentPath.includes('/orders')) {
+      fetchNewOrderCount();
+    }
   }, [currentPath]);
 
-  const handleNavClick = () => {
+  const handleNavClick = (item) => {
     // Auto-close sidebar on mobile after navigation
     if (isMobile) {
       toggleSidebar();
     }
     
     // If navigating to messages, reset unread count immediately
-    if (currentPath.includes('/messages')) {
+    if (item.to.includes('/messages')) {
       setUnreadCount(0);
+    }
+
+    // If navigating to orders, reset new order count immediately
+    if (item.to.includes('/orders')) {
+      setNewOrderCount(0);
     }
   };
 
@@ -147,24 +176,23 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
                       : "hover:bg-white/70 hover:shadow-sm"
                   }
                 `}
-                onClick={handleNavClick}
+                onClick={() => handleNavClick(item)}
               >
                 {item.icon}
                 <span className="truncate">{item.label}</span>
                 
-                {/* Notification Badge */}
+                {/* Message Notification Badge */}
                 {item.hasNotification && unreadCount > 0 && (
-                  <>
-                    {/* Show count if more than 0 */}
-                    {unreadCount > 0 && (
-                      <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
-                    )}
-                    
-                    {/* Alternative: Just show a red dot (uncomment this and comment out the count above if you prefer) */}
-                    {/* <span className="ml-auto w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span> */}
-                  </>
+                  <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+
+                {/* Order Notification Badge */}
+                {item.hasOrderNotification && newOrderCount > 0 && (
+                  <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                    {newOrderCount > 99 ? '99+' : newOrderCount}
+                  </span>
                 )}
               </Link>
             </li>
@@ -195,7 +223,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
                 : "hover:bg-white/70 hover:shadow-sm"
             }
           `}
-          onClick={handleNavClick}
+          onClick={() => handleNavClick({ to: `/${rolePrefix}/profile` })}
         >
           <Settings className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />
           <span>Profile</span>
