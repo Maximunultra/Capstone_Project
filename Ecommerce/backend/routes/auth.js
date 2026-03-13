@@ -3,12 +3,17 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { supabase } from "../server.js";
 import crypto from "crypto";
+
 const router = express.Router();
 
-// Enhanced login route with debugging and seller approval check
+const MAX_FAILED_ATTEMPTS = 3;
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+
     if (!email || !password)
       return res.status(400).json({ error: "Email and password are required" });
 
@@ -18,26 +23,64 @@ router.post("/login", async (req, res) => {
     if (error || !user)
       return res.status(401).json({ error: "Invalid email or password" });
 
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword)
-      return res.status(401).json({ error: "Invalid email or password" });
-
-    if (user.role === 'seller' && user.approval_status !== 'approved') {
-      const statusMessages = {
-        pending: "Your seller account is pending approval.",
-        rejected: "Your seller account has been rejected."
-      };
+    // ✅ Blocked — applies to ALL roles (buyer, seller, admin)
+    if (user.approval_status === 'blocked') {
       return res.status(403).json({
-        error: statusMessages[user.approval_status] || "Account not approved."
+        error: "Your account has been blocked by an administrator. Please contact support.",
+        code: "ACCOUNT_BLOCKED"
       });
     }
 
-    // ✅ Generate unique session token & save to DB (kicks out old device)
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+    if (!isValidPassword) {
+      const newFailedAttempts = (user.failed_login_attempts || 0) + 1;
+
+      if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
+        // ✅ Auto-block the account after 3 failed attempts
+        await supabase
+          .from("users")
+          .update({
+            approval_status: 'blocked',
+            failed_login_attempts: newFailedAttempts,
+            failed_login_at: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+
+        return res.status(403).json({
+          error: "Your account has been blocked due to too many failed login attempts. Please contact support.",
+          code: "ACCOUNT_BLOCKED",
+          auto_blocked: true,
+        });
+      }
+
+      // ✅ Increment failed attempts counter
+      await supabase
+        .from("users")
+        .update({
+          failed_login_attempts: newFailedAttempts,
+          failed_login_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      const attemptsLeft = MAX_FAILED_ATTEMPTS - newFailedAttempts;
+
+      return res.status(401).json({
+        error: `Invalid email or password. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining before your account is blocked.`,
+        attempts_left: attemptsLeft,
+      });
+    }
+
+    // ✅ Successful login — reset failed attempts counter
     const sessionToken = crypto.randomUUID();
 
     await supabase
       .from("users")
-      .update({ session_token: sessionToken })
+      .update({
+        session_token: sessionToken,
+        failed_login_attempts: 0,
+        failed_login_at: null,
+      })
       .eq("id", user.id);
 
     const token = jwt.sign(
@@ -55,7 +98,8 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Register route (optional)
+// ── Register ──────────────────────────────────────────────────────────────────
+
 router.post("/register", async (req, res) => {
   try {
     const { full_name, email, password, role = "buyers" } = req.body;
@@ -64,11 +108,9 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
-    // Hash password
     const saltRounds = 10;
-    let password_hash = await bcrypt.hash(password, saltRounds); // First declaration
+    const password_hash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
     const { data, error } = await supabase
       .from("users")
       .insert([{ full_name, email, password_hash, role }])
@@ -76,30 +118,20 @@ router.post("/register", async (req, res) => {
       .single();
 
     if (error) {
-      if (error.code === '23505') { // Unique constraint violation
+      if (error.code === '23505') {
         return res.status(400).json({ error: "Email already exists" });
       }
       throw error;
     }
 
-    // Generate token
     const token = jwt.sign(
-      { 
-        userId: data.id, 
-        email: data.email, 
-        role: data.role 
-      },
+      { userId: data.id, email: data.email, role: data.role },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "24h" }
     );
 
-    // Return user data (excluding password)
-    const { password_hash: _, ...userWithoutPassword } = data; // Exclude password_hash
-
-    res.status(201).json({
-      token,
-      user: userWithoutPassword
-    });
+    const { password_hash: _, ...userWithoutPassword } = data;
+    res.status(201).json({ token, user: userWithoutPassword });
 
   } catch (error) {
     console.error("Register error:", error);
@@ -107,26 +139,22 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// ── Reset Password ────────────────────────────────────────────────────────────
 
-// Add this temporary route to your auth.js for testing
 router.post("/reset-password", async (req, res) => {
   try {
     const { email, newPassword } = req.body;
-    
+
     if (!email || !newPassword) {
       return res.status(400).json({ error: "Email and new password are required" });
     }
 
-    // Hash the new password
     const saltRounds = 10;
     const password_hash = await bcrypt.hash(newPassword, saltRounds);
-    
-    console.log("New hash generated:", password_hash);
 
-    // Update user's password
     const { data, error } = await supabase
       .from("users")
-      .update({ password_hash })
+      .update({ password_hash, failed_login_attempts: 0, failed_login_at: null })
       .eq("email", email)
       .select()
       .single();
@@ -136,7 +164,6 @@ router.post("/reset-password", async (req, res) => {
       return res.status(400).json({ error: "Failed to update password" });
     }
 
-    console.log("Password updated for:", email);
     res.json({ message: "Password updated successfully" });
 
   } catch (error) {

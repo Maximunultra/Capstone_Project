@@ -28,8 +28,12 @@ import paymentRoutes from "./routes/payment.js";
 import messageRoutes from "./routes/messages.js"; // NEW: Message routes
 import feedbackRoutes from './routes/feedback.js';
 import adminAnalyticsRoutes from './routes/admin-analytics.js';
-import protectedRoutes from "./routes/protected.js"; 
+import protectedRoutes from "./routes/protected.js";
+import addressesRouter from "./routes/addresses.js";
+import categoryRulesRouter from "./routes/categoryRules.js"; // NEW: Category rules routes
 // Routes
+app.use("/api/category-rules", categoryRulesRouter); // NEW: Category rules routes
+app.use("/api/addresses", addressesRouter); // NEW: Address management routes
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use("/api/analytics", analyticsRoutes);  

@@ -3,7 +3,46 @@ import { supabase } from "../server.js";
 
 const router = express.Router();
 
-// Get all feedback for a product
+// ─────────────────────────────────────────────────────────────
+// ★ Helper: recalculate and sync rating_average + rating_count
+//   on the product table whenever a review is added/updated/deleted
+// ─────────────────────────────────────────────────────────────
+const syncProductRating = async (productId) => {
+  try {
+    // Fetch all ratings for this product
+    const { data: feedbacks, error } = await supabase
+      .from("feedback")
+      .select("rating")
+      .eq("product_id", productId);
+
+    if (error) throw error;
+
+    const count = feedbacks?.length || 0;
+    const average = count > 0
+      ? feedbacks.reduce((sum, f) => sum + f.rating, 0) / count
+      : 0;
+
+    // Update the product row with the freshly calculated values
+    const { error: updateError } = await supabase
+      .from("product")
+      .update({
+        rating_average: parseFloat(average.toFixed(2)),
+        rating_count: count,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", productId);
+
+    if (updateError) throw updateError;
+
+    console.log(`✅ Rating synced for product ${productId}: avg=${average.toFixed(2)}, count=${count}`);
+  } catch (err) {
+    console.error("❌ Failed to sync product rating:", err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// GET /product/:productId  — all reviews for a product
+// ─────────────────────────────────────────────────────────────
 router.get("/product/:productId", async (req, res) => {
   try {
     const { productId } = req.params;
@@ -30,7 +69,9 @@ router.get("/product/:productId", async (req, res) => {
   }
 });
 
-// Get feedback by a specific user for a product
+// ─────────────────────────────────────────────────────────────
+// GET /product/:productId/user/:userId  — one user's review
+// ─────────────────────────────────────────────────────────────
 router.get("/product/:productId/user/:userId", async (req, res) => {
   try {
     const { productId, userId } = req.params;
@@ -49,7 +90,7 @@ router.get("/product/:productId/user/:userId", async (req, res) => {
       .eq("user_id", userId)
       .single();
 
-    if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
+    if (error && error.code !== 'PGRST116') throw error;
 
     res.json(data || null);
   } catch (error) {
@@ -58,33 +99,29 @@ router.get("/product/:productId/user/:userId", async (req, res) => {
   }
 });
 
-// Create a new review
+// ─────────────────────────────────────────────────────────────
+// POST /  — create a new review
+// ★ FIX: calls syncProductRating after insert
+// ─────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
     const { product_id, user_id, rating, comment } = req.body;
 
-    // Validate required fields
     if (!product_id || !user_id || !rating || !comment) {
       return res.status(400).json({
         error: "product_id, user_id, rating, and comment are required"
       });
     }
 
-    // Validate rating range
     if (rating < 1 || rating > 5) {
-      return res.status(400).json({
-        error: "Rating must be between 1 and 5"
-      });
+      return res.status(400).json({ error: "Rating must be between 1 and 5" });
     }
 
-    // Validate comment length
     if (comment.trim().length < 10) {
-      return res.status(400).json({
-        error: "Comment must be at least 10 characters long"
-      });
+      return res.status(400).json({ error: "Comment must be at least 10 characters long" });
     }
 
-    // Check if user has already reviewed this product
+    // Check if user already reviewed this product
     const { data: existingReview } = await supabase
       .from("feedback")
       .select("id")
@@ -98,7 +135,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Create the review
     const { data, error } = await supabase
       .from("feedback")
       .insert([{
@@ -121,6 +157,9 @@ router.post("/", async (req, res) => {
 
     if (error) throw error;
 
+    // ★ Recalculate product rating now that a new review was added
+    await syncProductRating(product_id);
+
     console.log("✅ Review created successfully");
     res.status(201).json(data);
   } catch (error) {
@@ -129,16 +168,18 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Update an existing review
+// ─────────────────────────────────────────────────────────────
+// PUT /:id  — update an existing review
+// ★ FIX: calls syncProductRating after update
+// ─────────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { rating, comment, user_id } = req.body;
 
-    // Get the existing review to verify ownership
     const { data: existingReview, error: fetchError } = await supabase
       .from("feedback")
-      .select("user_id")
+      .select("user_id, product_id")
       .eq("id", id)
       .single();
 
@@ -146,14 +187,11 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Review not found" });
     }
 
-    // Verify user owns this review
     if (existingReview.user_id !== user_id) {
       return res.status(403).json({ error: "You can only edit your own reviews" });
     }
 
-    const updateData = {
-      updated_at: new Date().toISOString()
-    };
+    const updateData = { updated_at: new Date().toISOString() };
 
     if (rating !== undefined) {
       if (rating < 1 || rating > 5) {
@@ -185,6 +223,9 @@ router.put("/:id", async (req, res) => {
 
     if (error) throw error;
 
+    // ★ Recalculate product rating now that a review was changed
+    await syncProductRating(existingReview.product_id);
+
     console.log("✅ Review updated successfully");
     res.json(data);
   } catch (error) {
@@ -193,7 +234,10 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// Delete a review
+// ─────────────────────────────────────────────────────────────
+// DELETE /:id  — delete a review
+// ★ FIX: calls syncProductRating after delete
+// ─────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -203,7 +247,6 @@ router.delete("/:id", async (req, res) => {
       return res.status(400).json({ error: "user_id is required" });
     }
 
-    // Get the existing review to verify ownership
     const { data: existingReview, error: fetchError } = await supabase
       .from("feedback")
       .select("user_id, product_id")
@@ -214,7 +257,6 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Review not found" });
     }
 
-    // Verify user owns this review (or allow admin to delete - you can add admin check here)
     if (existingReview.user_id !== user_id) {
       return res.status(403).json({ error: "You can only delete your own reviews" });
     }
@@ -226,6 +268,9 @@ router.delete("/:id", async (req, res) => {
 
     if (error) throw error;
 
+    // ★ Recalculate product rating now that a review was removed
+    await syncProductRating(existingReview.product_id);
+
     console.log("✅ Review deleted successfully");
     res.json({ message: "Review deleted successfully" });
   } catch (error) {
@@ -234,7 +279,9 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// Get all feedback by a user (across all products)
+// ─────────────────────────────────────────────────────────────
+// GET /user/:userId  — all reviews by a user across products
+// ─────────────────────────────────────────────────────────────
 router.get("/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -258,6 +305,34 @@ router.get("/user/:userId", async (req, res) => {
     res.json(data || []);
   } catch (error) {
     console.error("❌ Error fetching user feedback:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /sync-all  — one-time fix: recalculate ratings for ALL
+//   products (useful to fix existing stale data)
+// ─────────────────────────────────────────────────────────────
+router.post("/sync-all", async (req, res) => {
+  try {
+    // Get all distinct product_ids that have feedback
+    const { data: products, error } = await supabase
+      .from("feedback")
+      .select("product_id");
+
+    if (error) throw error;
+
+    const uniqueProductIds = [...new Set(products.map(f => f.product_id))];
+
+    await Promise.all(uniqueProductIds.map(id => syncProductRating(id)));
+
+    res.json({
+      success: true,
+      message: `Ratings synced for ${uniqueProductIds.length} products`,
+      synced_products: uniqueProductIds.length
+    });
+  } catch (error) {
+    console.error("❌ Error syncing all ratings:", error);
     res.status(500).json({ error: error.message });
   }
 });
