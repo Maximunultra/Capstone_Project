@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import cron from 'node-cron';
 import bcrypt from 'bcrypt';
 dotenv.config();
 
@@ -31,7 +32,11 @@ import adminAnalyticsRoutes from './routes/admin-analytics.js';
 import protectedRoutes from "./routes/protected.js";
 import addressesRouter from "./routes/addresses.js";
 import categoryRulesRouter from "./routes/categoryRules.js"; // NEW: Category rules routes
+import shippingRouter from './routes/shipping.js';
+import refundsRouter from './routes/refunds.js';
 // Routes
+app.use('/api/refunds', refundsRouter);
+app.use('/api/shipping', shippingRouter);
 app.use("/api/category-rules", categoryRulesRouter); // NEW: Category rules routes
 app.use("/api/addresses", addressesRouter); // NEW: Address management routes
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
@@ -46,6 +51,31 @@ app.use("/api/promotions", promotionRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/protected", protectedRoutes);
+
+// Runs every 5 minutes — marks promotions as 'expired' when end_date has passed
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const now = new Date().toISOString();
+ 
+    const { data, error } = await supabase
+      .from('promotions')
+      .update({ status: 'expired', updated_at: now })
+      .eq('status', 'approved')
+      .lt('end_date', now)   // end_date < now = already passed
+      .select('id, promotion_title');
+ 
+    if (error) throw error;
+ 
+    if (data && data.length > 0) {
+      console.log(`⏰ Cron: expired ${data.length} promotion(s):`, data.map(p => p.promotion_title));
+    }
+  } catch (err) {
+    console.error('❌ Promotion expiry cron error:', err.message);
+  }
+});
+ 
+console.log('✅ Promotion expiry cron job started (runs every 5 minutes)');
+ 
 // Email transporter setup
 const transporter = nodemailer.createTransport({
   service: 'gmail',

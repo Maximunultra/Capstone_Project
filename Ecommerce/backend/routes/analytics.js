@@ -417,4 +417,52 @@ router.get("/product-stock", async (req, res) => {
   }
 });
 
+router.get("/payment-transactions", async (req, res) => {
+  try {
+    const sellerProductIds = await getSellerProductIds(req.sellerId);
+    if (!sellerProductIds.length) return res.json({ success: true, data: [] });
+ 
+    // Get all order IDs that contain this seller's products
+    const { data: orderItems } = await supabase
+      .from("order_items")
+      .select("order_id")
+      .in("product_id", sellerProductIds);
+ 
+    const orderIds = [...new Set((orderItems || []).map(i => i.order_id))];
+    if (!orderIds.length) return res.json({ success: true, data: [] });
+ 
+    // Fetch those orders — all statuses, all payment methods
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select(`
+        id, order_number, order_date, order_status,
+        payment_method, payment_status,
+        total_amount, subtotal, tax, shipping_fee
+      `)
+      .in("id", orderIds)
+      .order("order_date", { ascending: false });
+ 
+    if (error) throw error;
+ 
+    // Return WITHOUT gateway IDs (payment_intent_id, payment_capture_id)
+    // Seller only needs to know payment method, status, and order status
+    const data = (orders || []).map(o => ({
+      order_number:   o.order_number,
+      order_date:     o.order_date,
+      order_status:   o.order_status,
+      payment_method: o.payment_method,
+      payment_status: o.payment_status,
+      total_amount:   parseFloat(o.total_amount  || 0).toFixed(2),
+      subtotal:       parseFloat(o.subtotal       || 0).toFixed(2),
+      tax:            parseFloat(o.tax            || 0).toFixed(2),
+      shipping_fee:   parseFloat(o.shipping_fee   || 0).toFixed(2),
+    }));
+ 
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error("Error /analytics/payment-transactions:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;

@@ -253,7 +253,7 @@ router.post("/", upload.single('image'), async (req, res) => {
         return res.status(403).json({ success: false, error: 'Invalid receiver for this order' });
       }
 
-      const allowedStatuses = ['pending', 'processing', 'shipped', 'delivered'];
+      const allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
       if (!allowedStatuses.includes(orderData.order_status)) {
         return res.status(400).json({ success: false, error: 'Cannot send messages for orders with status: ' + orderData.order_status });
       }

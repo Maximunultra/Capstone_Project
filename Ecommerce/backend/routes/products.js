@@ -1,7 +1,7 @@
 import express from "express";
 import multer from "multer";
 import { supabase } from "../server.js";
-
+import { logActivity } from "./activityLogger.js";
 const router = express.Router();
 
 const storage = multer.memoryStorage();
@@ -37,6 +37,8 @@ const uploadImageToSupabase = async (file, productId) => {
 
 // ─────────────────────────────────────────────────────────────
 // 🤖 AUTO-APPROVAL ENGINE
+// Reads category_rules table and decides: approved | rejected | pending
+// Returns { status, reason }
 // ─────────────────────────────────────────────────────────────
 const runAutoApproval = async ({ category, price, brand }) => {
   if (!category) {
@@ -54,11 +56,13 @@ const runAutoApproval = async ({ category, price, brand }) => {
     return { status: 'pending', reason: 'Could not fetch category rules — manual review required.' };
   }
 
+  // No rule for this category → auto-approve (no restrictions)
   if (!rule) {
     console.log(`ℹ️ No rule for "${category}" — auto-approving.`);
     return { status: 'approved', reason: null };
   }
 
+  // ── Price range check ────────────────────────────────────
   if (rule.min_price !== null && price < rule.min_price) {
     return {
       status: 'rejected',
@@ -72,6 +76,7 @@ const runAutoApproval = async ({ category, price, brand }) => {
     };
   }
 
+  // ── Material / brand check ───────────────────────────────
   if (rule.allowed_materials && rule.allowed_materials.length > 0 && brand) {
     const normalizedBrand = brand.trim().toLowerCase();
     const allowed = rule.allowed_materials.map(m => m.toLowerCase());
@@ -89,7 +94,7 @@ const runAutoApproval = async ({ category, price, brand }) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// POST /upload
+// POST /upload  — image upload
 // ─────────────────────────────────────────────────────────────
 router.post("/upload", upload.array('images', 5), async (req, res) => {
   try {
@@ -104,7 +109,8 @@ router.post("/upload", upload.array('images', 5), async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// GET /categories
+// GET /categories  — return all distinct categories from category_rules
+// Used by the seller ProductForm dropdown
 // ─────────────────────────────────────────────────────────────
 router.get("/categories", async (req, res) => {
   try {
@@ -123,7 +129,6 @@ router.get("/categories", async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────
 // GET /  — list products with filters
-// ★ UPDATED: store search is STRICT — only shows that store's products
 // ─────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -133,22 +138,6 @@ router.get("/", async (req, res) => {
       limit = 50, offset = 0
     } = req.query;
 
-    // ── Step 1: Check if search term matches any store or seller name ──
-    let storeMatchUserIds = [];
-    let isStoreSearch = false;
-
-    if (search) {
-      const { data: matchedUsers } = await supabase
-        .from('users')
-        .select('id')
-        .or(`store_name.ilike.%${search}%,full_name.ilike.%${search}%`);
-
-      storeMatchUserIds = matchedUsers?.map(u => u.id) || [];
-      // If ANY store/seller matched → treat as a pure store search
-      isStoreSearch = storeMatchUserIds.length > 0;
-    }
-
-    // ── Step 2: Build main product query ──
     let query = supabase
       .from("product")
       .select(`
@@ -161,35 +150,17 @@ router.get("/", async (req, res) => {
       query = query.eq('approval_status', 'approved').eq('is_active', true);
     }
 
-    if (category)    query = query.eq('category', category);
-    if (user_id)     query = query.eq('user_id', user_id);
-    if (seller_id)   query = query.eq('user_id', seller_id);
+    if (category) query = query.eq('category', category);
+    if (user_id)  query = query.eq('user_id', user_id);
+    if (seller_id) query = query.eq('user_id', seller_id);
     if (is_active !== undefined && buyer_view !== 'true') query = query.eq('is_active', is_active === 'true');
     if (is_featured !== undefined) query = query.eq('is_featured', is_featured === 'true');
-    if (min_price)   query = query.gte('price', min_price);
-    if (max_price)   query = query.lte('price', max_price);
+    if (min_price) query = query.gte('price', min_price);
+    if (max_price) query = query.lte('price', max_price);
     if (approval_status && buyer_view !== 'true') query = query.eq('approval_status', approval_status);
+    if (search) query = query.or(`product_name.ilike.%${search}%,description.ilike.%${search}%`);
 
-    // ── Step 3: Apply search filter ──────────────────────────────
-    if (search) {
-      if (isStoreSearch) {
-        // ★ Store name matched → ONLY show products from that exact store
-        // No mixing with other stores even if their products match the keyword
-        query = query.in('user_id', storeMatchUserIds);
-      } else {
-        // No store matched → search product fields only
-        query = query.or([
-          `product_name.ilike.%${search}%`,
-          `description.ilike.%${search}%`,
-          `brand.ilike.%${search}%`,
-          `category.ilike.%${search}%`,
-        ].join(','));
-      }
-    }
-
-    query = query
-      .order('created_at', { ascending: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1);
+    query = query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -219,7 +190,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// POST /  — create product
+// POST /  — create product  ★ AUTO-APPROVAL + WEIGHT
 // ─────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
@@ -228,7 +199,9 @@ router.post("/", async (req, res) => {
       user_id, product_name, description, price, stock_quantity,
       category, brand, product_image, images, is_active, is_featured,
       discount_percentage, discount_start_date, discount_end_date, shipping_fee, material,
-      weight, weight_unit, tags
+      weight,        // ★ NEW: weight in grams
+      weight_unit,   // ★ NEW: 'g' | 'kg' | 'lbs' (stored as-is)
+      tags
     } = req.body;
 
     if (!user_id || !product_name || !price)
@@ -248,6 +221,7 @@ router.post("/", async (req, res) => {
     if (weight !== undefined && parseFloat(weight) < 0)
       return res.status(400).json({ error: "Weight cannot be negative" });
 
+    // ── Auto-approval decision ───────────────────────────────
     let approvalStatus = 'pending';
     let approvalReason = null;
     let approvedBy     = null;
@@ -259,7 +233,12 @@ router.post("/", async (req, res) => {
       approvedAt     = new Date().toISOString();
       console.log('👑 Admin product — auto-approved.');
     } else {
-      const autoResult = await runAutoApproval({ category, price: parseFloat(price), brand });
+      const autoResult = await runAutoApproval({
+        category,
+        price: parseFloat(price),
+        brand
+      });
+
       approvalStatus = autoResult.status;
       approvalReason = autoResult.reason;
 
@@ -290,8 +269,8 @@ router.post("/", async (req, res) => {
       discount_start_date: discount_start_date || null,
       discount_end_date:   discount_end_date   || null,
       shipping_fee:        parseFloat(shipping_fee) || 50.00,
-      weight:              weight ? parseFloat(weight) : null,
-      weight_unit:         weight_unit || 'g',
+      weight:              weight ? parseFloat(weight) : null,      // ★ NEW
+      weight_unit:         weight_unit || 'g',                      // ★ NEW
       tags:                tags || null,
       approval_status:     approvalStatus,
       approved_by:         approvedBy,
@@ -311,6 +290,15 @@ router.post("/", async (req, res) => {
 
     console.log(`✅ Product created (${approvalStatus}):`, data.product_name);
 
+    await logActivity({
+      userId:   user_id,
+      role:     user.role,
+      action:   `product_created_${approvalStatus}`,
+      category: "product",
+      description: `${user.role === "admin" ? "Admin" : "Seller"} created product "${product_name}" (₱${parseFloat(price).toFixed(2)}) — ${approvalStatus}`,
+      metadata: { product_id: data.id, product_name, price, category, approval_status: approvalStatus, rejection_reason: approvalReason || null },
+      req,
+    });
     res.status(201).json({
       ...data,
       _approval_message:
@@ -347,6 +335,38 @@ router.put("/:id", async (req, res) => {
     if (user_id && existingProduct.user_id !== user_id)
       return res.status(403).json({ error: "You don't have permission to update this product." });
 
+    // Fetch existing product to get current values for approval re-check
+    const { data: fullProduct } = await supabase
+      .from("product").select("user_id, category, price, brand, approval_status").eq("id", id).single();
+
+    // Determine the effective values (new if provided, else existing)
+    const effectiveCategory = category  !== undefined ? category  : fullProduct.category;
+    const effectivePrice    = price     !== undefined ? parseFloat(price) : fullProduct.price;
+    const effectiveBrand    = brand     !== undefined ? brand     : (material !== undefined ? material : fullProduct.brand);
+
+    // Re-run auto-approval only when a seller (not admin) changes approval-relevant fields
+    const { data: productOwner } = await supabase
+      .from("users").select("role").eq("id", fullProduct.user_id).single();
+
+    const isSellerEdit = productOwner?.role === 'seller';
+    const approvalFieldsChanged = category !== undefined || price !== undefined || brand !== undefined || material !== undefined;
+
+    let approvalUpdates = {};
+    if (isSellerEdit && approvalFieldsChanged) {
+      const autoResult = await runAutoApproval({
+        category: effectiveCategory,
+        price:    effectivePrice,
+        brand:    effectiveBrand,
+      });
+
+      approvalUpdates.approval_status  = autoResult.status;
+      approvalUpdates.rejection_reason = autoResult.reason || null;
+      approvalUpdates.approved_at      = autoResult.status === 'approved' ? new Date().toISOString() : null;
+      approvalUpdates.approved_by      = null; // cleared — re-evaluated
+
+      console.log(`🔄 Re-approval on edit: ${autoResult.status}${autoResult.reason ? ' — ' + autoResult.reason : ''}`);
+    }
+
     const u = {};
     if (product_name      !== undefined) u.product_name      = product_name;
     if (description       !== undefined) u.description       = description;
@@ -369,6 +389,9 @@ router.put("/:id", async (req, res) => {
       if (parseFloat(shipping_fee) < 0) return res.status(400).json({ error: "Shipping fee cannot be negative" });
       u.shipping_fee = parseFloat(shipping_fee);
     }
+
+    // Merge approval updates if re-evaluated
+    Object.assign(u, approvalUpdates);
     u.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -376,7 +399,25 @@ router.put("/:id", async (req, res) => {
       .select(`*, users:user_id(id,full_name,email,store_name)`).single();
 
     if (error) throw error;
-    res.json(data);
+
+    // Include approval message in response so frontend can show it
+    const approvalMsg = approvalUpdates.approval_status === 'approved'
+      ? '✅ Your product has been automatically approved and is now live!'
+      : approvalUpdates.approval_status === 'rejected'
+      ? `❌ Auto-rejected: ${approvalUpdates.rejection_reason}`
+      : approvalUpdates.approval_status === 'pending'
+      ? `⏳ Under review: ${approvalUpdates.rejection_reason}`
+      : null;
+    await logActivity({
+      userId:   user_id || fullProduct.user_id,
+      role:     productOwner?.role || "seller",
+      action:   "product_updated",
+      category: "product",
+      description: `Product "${data.product_name}" updated${approvalUpdates.approval_status ? ` — re-approval: ${approvalUpdates.approval_status}` : ""}`,
+      metadata: { product_id: id, product_name: data.product_name, approval_status: approvalUpdates.approval_status || data.approval_status },
+      req,
+    });
+    res.json({ ...data, _approval_message: approvalMsg });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -406,6 +447,15 @@ router.delete("/:id", async (req, res) => {
       if (del.length) await supabase.storage.from('product-images').remove(del);
     } catch (e) { console.error('Image cleanup error:', e); }
 
+    await logActivity({
+      userId:   user_id || null,
+      role:     "seller",
+      action:   "product_deleted",
+      category: "product",
+      description: `Product deleted: "${product.product_name || id}"`,
+      metadata: { product_id: id },
+      req,
+    });
     res.json({ message: "Product deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -464,6 +514,15 @@ router.patch("/:id/approve", async (req, res) => {
       .update({ approval_status:'approved', approved_by:admin_id, approved_at:new Date().toISOString(), rejection_reason:null, updated_at:new Date().toISOString() })
       .eq("id", id).select().single();
     if (error) throw error;
+    await logActivity({
+      userId:   admin_id,
+      role:     "admin",
+      action:   "product_approved",
+      category: "product",
+      description: `Admin approved product "${data.product_name}"`,
+      metadata: { product_id: id, product_name: data.product_name, admin_id },
+      req,
+    });
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -483,6 +542,15 @@ router.patch("/:id/reject", async (req, res) => {
       .update({ approval_status:'rejected', approved_by:admin_id, approved_at:new Date().toISOString(), rejection_reason:rejection_reason||'No reason provided', updated_at:new Date().toISOString() })
       .eq("id", id).select().single();
     if (error) throw error;
+    await logActivity({
+      userId:   admin_id,
+      role:     "admin",
+      action:   "product_rejected",
+      category: "product",
+      description: `Admin rejected product "${data.product_name}" — ${rejection_reason || "No reason"}`,
+      metadata: { product_id: id, product_name: data.product_name, rejection_reason: rejection_reason || null },
+      req,
+    });
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });

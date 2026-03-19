@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import bcrypt from 'bcrypt';
 import { supabase } from "../server.js";
-
+import { logActivity } from "./activityLogger.js";
 const router = express.Router();
 
 const storage = multer.memoryStorage();
@@ -15,7 +15,6 @@ const upload = multer({
   }
 });
 
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function hashPassword(password) {
@@ -25,12 +24,20 @@ async function hashPassword(password) {
   return hashed;
 }
 
-// Validate Philippine phone (11 digits, starts with 09)
+function validateUsername(username) {
+  if (!username) return null;
+  if (username.length < 3)    return 'Username must be at least 3 characters';
+  if (username.length > 30)   return 'Username must be 30 characters or less';
+  if (!/^[a-z0-9_]+$/.test(username))
+    return 'Username can only contain lowercase letters, numbers, and underscores';
+  return null;
+}
+
 function validatePhoneNumber(phone) {
   if (!phone) return null;
   const digits = String(phone).replace(/\D/g, '');
-  if (digits.length !== 11)        return 'Phone number must be exactly 11 digits';
-  if (!digits.startsWith('09'))    return 'Phone number must start with 09';
+  if (digits.length !== 11)     return 'Phone number must be exactly 11 digits';
+  if (!digits.startsWith('09')) return 'Phone number must start with 09';
   return null;
 }
 
@@ -72,15 +79,12 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ── Get Admin User (MUST be before /:id to avoid route conflict) ──────────────
+// ── Get Admin User (MUST be before /:id) ─────────────────────────────────────
 
 router.get('/admin', async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from('users')
-      .select('id, full_name, email')
-      .eq('role', 'admin')
-      .single();
+      .from('users').select('id, full_name, email').eq('role', 'admin').single();
     if (error || !data) return res.status(404).json({ error: 'Admin not found' });
     res.json(data);
   } catch (err) {
@@ -95,7 +99,8 @@ router.post("/", async (req, res) => {
     const {
       full_name, email, password, role, phone,
       address, birthdate, profile_image,
-      proof_document, valid_id_front, valid_id_back, store_name
+      proof_document, valid_id_front, valid_id_back, store_name,
+      username
     } = req.body;
 
     if (!full_name || !email || !password || !role)
@@ -107,6 +112,22 @@ router.post("/", async (req, res) => {
     if (phone) {
       const phoneError = validatePhoneNumber(phone);
       if (phoneError) return res.status(400).json({ error: phoneError });
+    }
+    if (username) {
+      const usernameError = validateUsername(String(username).toLowerCase());
+      if (usernameError) return res.status(400).json({ error: usernameError });
+    
+      // ✅ Use .maybeSingle() instead of .single()
+      // .single() throws a PostgREST error when no row is found (PGRST116)
+      // .maybeSingle() returns null cleanly when no match exists
+      const { data: existingUsername, error: uErr } = await supabase
+        .from("users")
+        .select("id")
+        .eq("username", username.toLowerCase())
+        .maybeSingle();
+    
+      if (uErr) throw uErr; // real DB error — surface it
+      if (existingUsername) return res.status(409).json({ error: "Username is already taken" });
     }
     if (birthdate) {
       const birth = new Date(birthdate), today = new Date();
@@ -130,7 +151,11 @@ router.post("/", async (req, res) => {
 
     const password_hash = await hashPassword(password);
     const { data, error } = await supabase.from("users").insert([{
-      full_name, email, password_hash, role,
+      full_name,
+      username:       username ? username.toLowerCase() : null,
+      email,
+      password_hash,
+      role,
       phone:          phone          || null,
       address:        address        || null,
       birthdate:      birthdate      || null,
@@ -146,6 +171,16 @@ router.post("/", async (req, res) => {
 
     if (error) throw error;
     const { password_hash: _, ...userResponse } = data;
+
+    await logActivity({
+      userId:   data.id,
+      role:     data.role,
+      action:   "user_registered",
+      category: "auth",
+      description: `New ${role} registered: ${full_name} (${email})`,
+      metadata: { user_id: data.id, email, role, store_name: store_name || null },
+      req,
+    });
     res.status(201).json(userResponse);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -176,7 +211,8 @@ router.put("/:id", async (req, res) => {
     const {
       full_name, email, password, role, phone,
       address, birthdate, profile_image,
-      proof_document, valid_id_front, valid_id_back, store_name
+      proof_document, valid_id_front, valid_id_back, store_name,
+      username
     } = req.body;
 
     const { data: existingUser, error: fetchError } = await supabase
@@ -192,6 +228,21 @@ router.put("/:id", async (req, res) => {
       if (phoneError) return res.status(400).json({ error: phoneError });
     }
 
+    if (username !== undefined && username) {
+      const usernameError = validateUsername(String(username).toLowerCase());
+      if (usernameError) return res.status(400).json({ error: usernameError });
+
+      const { data: existingUsername, error: uErr } = await supabase
+        .from("users")
+        .select("id")
+        .eq("username", username.toLowerCase())
+        .neq("id", id)
+        .maybeSingle();
+
+      if (uErr) throw uErr;
+      if (existingUsername) return res.status(409).json({ error: "Username is already taken" });
+    }
+
     if (birthdate) {
       const birth = new Date(birthdate), today = new Date();
       let age = today.getFullYear() - birth.getFullYear();
@@ -201,20 +252,19 @@ router.put("/:id", async (req, res) => {
     }
 
     const u = {};
-    if (full_name  !== undefined) u.full_name  = full_name  || null;
-    if (email      !== undefined) u.email      = email      || null;
-    if (store_name !== undefined) u.store_name = store_name || null;
-    if (phone      !== undefined) u.phone      = phone      || null;
-    if (address    !== undefined) u.address    = address    || null;
-    if (birthdate  !== undefined) u.birthdate  = birthdate  || null;
+    if (full_name      !== undefined) u.full_name      = full_name      || null;
+    if (email          !== undefined) u.email          = email          || null;
+    if (username       !== undefined) u.username       = username ? username.toLowerCase() : null;
+    if (store_name     !== undefined) u.store_name     = store_name     || null;
+    if (phone          !== undefined) u.phone          = phone          || null;
+    if (address        !== undefined) u.address        = address        || null;
+    if (birthdate      !== undefined) u.birthdate      = birthdate      || null;
     if (profile_image  !== undefined) u.profile_image  = profile_image  || null;
     if (proof_document !== undefined) u.proof_document = proof_document || null;
     if (valid_id_front !== undefined) u.valid_id_front = valid_id_front || null;
     if (valid_id_back  !== undefined) u.valid_id_back  = valid_id_back  || null;
 
-    if (password) {
-      u.password_hash = await hashPassword(password);
-    }
+    if (password) { u.password_hash = await hashPassword(password); }
 
     if (role) {
       if (!['buyer', 'seller'].includes(role))
@@ -223,18 +273,37 @@ router.put("/:id", async (req, res) => {
     }
 
     u.updated_at = new Date().toISOString();
-
     console.log('💾 Updating user with fields:', JSON.stringify(u, null, 2));
 
     const { data, error } = await supabase
-      .from("users")
-      .update(u)
-      .eq("id", id)
-      .select()
-      .single();
+      .from("users").update(u).eq("id", id).select().single();
 
     if (error) throw error;
     if (!data) return res.status(404).json({ error: "Update failed — user not found in DB" });
+
+    // ── Activity log ──────────────────────────────────────────────────────────
+    const changedFields = Object.keys(u).filter(k => k !== 'updated_at' && k !== 'password_hash');
+    const actorId   = req.body.admin_id || id;
+    const actorRole = req.body.admin_id ? 'admin' : (data.role || 'user');
+
+    await logActivity({
+      userId:   actorId,
+      role:     actorRole,
+      action:   'user_updated',
+      category: 'user',
+      description: req.body.admin_id
+        ? `Admin updated profile for ${data.full_name} (${data.email})`
+        : `${data.full_name} updated their profile`,
+      metadata: {
+        updated_user_id:  id,
+        updated_by:       actorId,
+        fields_changed:   changedFields,
+        password_changed: !!u.password_hash,
+        email:            data.email,
+      },
+      req,
+    });
+    // ─────────────────────────────────────────────────────────────────────────
 
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
@@ -268,12 +337,21 @@ router.delete("/:id", async (req, res) => {
 
     if (user) {
       const toDelete = [user.profile_image, user.proof_document, user.valid_id_front, user.valid_id_back]
-        .filter(Boolean)
-        .map(url => `profiles/${url.split('/').pop()}`);
+        .filter(Boolean).map(url => `profiles/${url.split('/').pop()}`);
       if (toDelete.length) {
         try { await supabase.storage.from('user-profile-images').remove(toDelete); } catch {}
       }
     }
+
+    await logActivity({
+      userId:   null,
+      role:     "admin",
+      action:   "user_deleted",
+      category: "user",
+      description: `User deleted (ID: ${id}, role: ${user?.role || "unknown"})`,
+      metadata: { deleted_user_id: id, role: user?.role },
+      req,
+    });
 
     res.json({ message: "User deleted successfully" });
   } catch (error) {
@@ -301,9 +379,63 @@ router.patch("/:id/approval", async (req, res) => {
       .eq("id", id).select().single();
     if (error) throw error;
 
+    await logActivity({
+      userId:   req.body.admin_id || null,
+      role:     "admin",
+      action:   approval_status === "blocked" ? "user_blocked" : "user_unblocked",
+      category: "user",
+      description: `Admin ${approval_status === "blocked" ? "blocked" : "unblocked"} user: ${user.role} (ID: ${id})`,
+      metadata: { target_user_id: id, target_role: user.role, approval_status },
+      req,
+    });
     const { password_hash, ...userResponse } = data;
     res.json(userResponse);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ── Change Password ───────────────────────────────────────────────────────────
+
+router.put("/:id/change-password", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password)
+      return res.status(400).json({ error: "current_password and new_password are required" });
+    if (new_password.length < 6)
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    if (current_password === new_password)
+      return res.status(400).json({ error: "New password must be different from your current password" });
+
+    const { data: user, error: fetchError } = await supabase
+      .from("users").select("id, password_hash, role").eq("id", id).single();
+    if (fetchError || !user)
+      return res.status(404).json({ error: "User not found" });
+
+    const isMatch = await bcrypt.compare(current_password, user.password_hash);
+    if (!isMatch)
+      return res.status(401).json({ error: "Current password is incorrect" });
+
+    const new_password_hash = await hashPassword(new_password);
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({ password_hash: new_password_hash, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (updateError) throw updateError;
+
+    await logActivity({
+      userId: id, role: user.role,
+      action: "password_changed", category: "auth",
+      description: `User changed their password`,
+      metadata: { user_id: id },
+      req,
+    });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("❌ Change password error:", error);
     res.status(500).json({ error: error.message });
   }
 });

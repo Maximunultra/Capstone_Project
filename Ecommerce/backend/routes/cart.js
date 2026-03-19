@@ -38,6 +38,8 @@ router.get("/:userId", async (req, res) => {
           rating_average,
           rating_count,
           shipping_fee,
+          weight,
+          weight_unit,
           user_id
         )
       `)
