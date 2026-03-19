@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ProductForm from '../Components/ProductForm';
+import { BookOpen } from 'lucide-react';
 
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
+// ─────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────
 const ProductListPage = ({ userId, userRole }) => {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showRulesTooltip, setShowRulesTooltip] = useState(false);
 
-  const [searchInput, setSearchInput] = useState('');       // raw input (live)
-  const [debouncedSearch, setDebouncedSearch] = useState(''); // debounced value used in fetch
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   const [filters, setFilters] = useState({
     category: '',
@@ -25,10 +30,9 @@ const ProductListPage = ({ userId, userRole }) => {
 
   const [pagination, setPagination] = useState({ limit: 12, offset: 0, total: 0 });
 
-  const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
+  const currentUserId   = userId   || JSON.parse(localStorage.getItem('user') || '{}').id;
   const currentUserRole = userRole || JSON.parse(localStorage.getItem('user') || '{}').role;
 
-  // ── Debounce search (500ms) ──────────────────────────────────────
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchInput);
@@ -37,7 +41,6 @@ const ProductListPage = ({ userId, userRole }) => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // ── Fetch products (runs whenever filters/search/page changes) ───
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -46,14 +49,11 @@ const ProductListPage = ({ userId, userRole }) => {
       params.append('limit', pagination.limit);
       params.append('offset', pagination.offset);
 
-      if (currentUserRole === 'seller' && currentUserId) {
-        params.append('seller_id', currentUserId);
-      }
-
+      if (currentUserRole === 'seller' && currentUserId) params.append('seller_id', currentUserId);
       if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
-      if (filters.category) params.append('category', filters.category);
-      if (filters.minPrice) params.append('min_price', filters.minPrice);
-      if (filters.maxPrice) params.append('max_price', filters.maxPrice);
+      if (filters.category)       params.append('category', filters.category);
+      if (filters.minPrice)       params.append('min_price', filters.minPrice);
+      if (filters.maxPrice)       params.append('max_price', filters.maxPrice);
       if (filters.approvalStatus !== 'all') params.append('approval_status', filters.approvalStatus);
 
       const response = await fetch(`${API_BASE_URL}/products?${params}`);
@@ -63,11 +63,11 @@ const ProductListPage = ({ userId, userRole }) => {
       let fetched = [...(data.products || [])];
 
       switch (filters.sortBy) {
-        case 'newest':    fetched.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); break;
-        case 'oldest':    fetched.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); break;
-        case 'price-low': fetched.sort((a, b) => a.price - b.price); break;
+        case 'newest':     fetched.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); break;
+        case 'oldest':     fetched.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); break;
+        case 'price-low':  fetched.sort((a, b) => a.price - b.price); break;
         case 'price-high': fetched.sort((a, b) => b.price - a.price); break;
-        case 'name-az':   fetched.sort((a, b) => a.product_name.localeCompare(b.product_name)); break;
+        case 'name-az':    fetched.sort((a, b) => a.product_name.localeCompare(b.product_name)); break;
         case 'stock-high': fetched.sort((a, b) => b.stock_quantity - a.stock_quantity); break;
         default: break;
       }
@@ -85,7 +85,6 @@ const ProductListPage = ({ userId, userRole }) => {
     if (!showAddForm) fetchProducts();
   }, [fetchProducts, showAddForm]);
 
-  // ── Filter change helpers (all reset to page 1) ──────────────────
   const handleFilterChange = (name, value) => {
     setFilters(prev => ({ ...prev, [name]: value }));
     setPagination(prev => ({ ...prev, offset: 0 }));
@@ -93,11 +92,10 @@ const ProductListPage = ({ userId, userRole }) => {
 
   const handlePriceRangeChange = (value) => {
     let minPrice = '', maxPrice = '';
-    if (value === 'under1000')  { maxPrice = '1000'; }
-    else if (value === '1000-1500') { minPrice = '1000'; maxPrice = '1500'; }
-    else if (value === '1500-2000') { minPrice = '1500'; maxPrice = '2000'; }
-    else if (value === 'over2000')  { minPrice = '2000'; }
-
+    if      (value === 'under1000')  { maxPrice = '1000'; }
+    else if (value === '1000-1500')  { minPrice = '1000'; maxPrice = '1500'; }
+    else if (value === '1500-2000')  { minPrice = '1500'; maxPrice = '2000'; }
+    else if (value === 'over2000')   { minPrice = '2000'; }
     setFilters(prev => ({ ...prev, priceRange: value, minPrice, maxPrice }));
     setPagination(prev => ({ ...prev, offset: 0 }));
   };
@@ -105,11 +103,10 @@ const ProductListPage = ({ userId, userRole }) => {
   const clearFilters = () => {
     setSearchInput('');
     setDebouncedSearch('');
-    setFilters({ category: '', priceRange: 'all', minPrice: '', maxPrice: '', approvalStatus: 'all', sortBy: 'newest' });
+    setFilters({ category:'', priceRange:'all', minPrice:'', maxPrice:'', approvalStatus:'all', sortBy:'newest' });
     setPagination(prev => ({ ...prev, offset: 0 }));
   };
 
-  // ── Admin actions ────────────────────────────────────────────────
   const handleApprove = async (productId) => {
     if (currentUserRole !== 'admin') return;
     try {
@@ -177,11 +174,12 @@ const ProductListPage = ({ userId, userRole }) => {
 
   const hasActiveFilters = filters.category || filters.priceRange !== 'all' || filters.approvalStatus !== 'all' || debouncedSearch;
 
+  // ── Add product view ──────────────────────────────────────
   if (showAddForm) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
         <div className="max-w-4xl mx-auto">
-          <button onClick={() => setShowAddForm(false)} className="mb-4 flex items-center text-amber-700 hover:text-amber-900 transition-colors duration-300 font-medium">
+          <button onClick={() => setShowAddForm(false)} className="mb-4 flex items-center text-amber-700 hover:text-amber-900 transition-colors font-medium">
             <span className="mr-2">←</span> Back to Products
           </button>
           <ProductForm
@@ -198,24 +196,60 @@ const ProductListPage = ({ userId, userRole }) => {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-4 sm:py-6 lg:py-8 px-3 sm:px-4 lg:px-6">
       <div className="max-w-[1920px] mx-auto w-full">
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        {/* ── Header ───────────────────────────────────────── */}
+        <div className="mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex-1">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-2">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
               {currentUserRole === 'seller' ? 'My Products' : 'Product Management'}
             </h1>
             <p className="text-sm sm:text-base text-gray-600">
-              {currentUserRole === 'seller' ? 'Manage your product listings' : 'Review and approve product listings'}
+              {currentUserRole === 'seller'
+                ? 'Manage your product listings'
+                : 'Review and approve product listings'}
             </p>
           </div>
 
           {currentUserRole === 'seller' && (
-            <button
-              onClick={() => setShowAddForm(true)}
-              className="w-full sm:w-auto bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-sm sm:text-base"
-            >
-              <span className="text-xl">+</span> Add New Product
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+
+              {/* 📖 Rules book icon with tooltip + navigate */}
+              <div className="relative">
+                <button
+                  onMouseEnter={() => setShowRulesTooltip(true)}
+                  onMouseLeave={() => setShowRulesTooltip(false)}
+                  onClick={() => navigate('/seller/category-rules')}
+                  className="w-11 h-11 flex items-center justify-center bg-amber-100 hover:bg-amber-200 border-2 border-amber-400 hover:border-amber-600 text-amber-700 hover:text-amber-900 rounded-xl transition-all duration-200 shadow-md hover:shadow-lg flex-shrink-0"
+                  title="View Category Rules"
+                >
+                  <BookOpen className="w-5 h-5" />
+                </button>
+
+                {/* Floating tooltip */}
+                {showRulesTooltip && (
+                  <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-[#3d2e1e] text-white text-xs rounded-xl shadow-2xl p-3.5 pointer-events-none">
+                    {/* Arrow */}
+                    <div className="absolute -top-1.5 right-3 w-3 h-3 bg-[#3d2e1e] rotate-45 rounded-sm" />
+                    <p className="font-bold text-amber-300 mb-1.5 flex items-center gap-1.5">
+                      📋 Must Read Before Adding a Product
+                    </p>
+                    <ul className="space-y-1 text-amber-100 leading-relaxed">
+                      <li>• Each category has a <span className="text-white font-semibold">price range</span> — your product price must be within it.</li>
+                      <li>• Your <span className="text-white font-semibold">brand/material</span> must match the allowed materials for your category.</li>
+                      <li>• Products that fail rules are <span className="text-red-300 font-semibold">auto-rejected</span>.</li>
+                    </ul>
+                    <p className="mt-2 text-amber-400 font-medium">👆 Click to view all rules</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Add New Product button */}
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="flex-1 sm:flex-none bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-sm sm:text-base"
+              >
+                <span className="text-xl">+</span> Add New Product
+              </button>
+            </div>
           )}
 
           {currentUserRole === 'admin' && (
@@ -227,10 +261,10 @@ const ProductListPage = ({ userId, userRole }) => {
           )}
         </div>
 
-        {/* ── Search + Sort ───────────────────────────────────────── */}
+
+        {/* ── Search + Sort ─────────────────────────────────── */}
         <div className="mb-4">
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-            {/* Search with spinner indicator */}
             <div className="relative flex-1">
               <input
                 type="text"
@@ -252,8 +286,6 @@ const ProductListPage = ({ userId, userRole }) => {
                 )}
               </div>
             </div>
-
-            {/* Sort */}
             <select
               value={filters.sortBy}
               onChange={(e) => handleFilterChange('sortBy', e.target.value)}
@@ -269,12 +301,11 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         </div>
 
-        {/* ── Filters ─────────────────────────────────────────────── */}
+        {/* ── Filters ──────────────────────────────────────── */}
         <div className="mb-6 sm:mb-8">
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4 sm:p-6">
             <div className={`grid grid-cols-1 sm:grid-cols-2 ${currentUserRole === 'admin' ? 'lg:grid-cols-3' : 'lg:grid-cols-2'} gap-4 sm:gap-6`}>
 
-              {/* Category */}
               <div>
                 <div className="flex items-center justify-between mb-2 sm:mb-3">
                   <div className="flex items-center gap-2">
@@ -300,7 +331,6 @@ const ProductListPage = ({ userId, userRole }) => {
                 </select>
               </div>
 
-              {/* Price Range */}
               <div>
                 <div className="flex items-center justify-between mb-2 sm:mb-3">
                   <div className="flex items-center gap-2">
@@ -326,7 +356,6 @@ const ProductListPage = ({ userId, userRole }) => {
                 </select>
               </div>
 
-              {/* Approval Status — Admin only (Status filter removed) */}
               {currentUserRole === 'admin' && (
                 <div>
                   <div className="flex items-center justify-between mb-2 sm:mb-3">
@@ -354,7 +383,6 @@ const ProductListPage = ({ userId, userRole }) => {
               )}
             </div>
 
-            {/* Active filter chips + Clear All */}
             {hasActiveFilters && (
               <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
                 <span className="text-xs text-gray-500 font-medium">Active:</span>
@@ -382,10 +410,7 @@ const ProductListPage = ({ userId, userRole }) => {
                     <button onClick={() => handleFilterChange('approvalStatus', 'all')} className="hover:text-red-500 font-bold">×</button>
                   </span>
                 )}
-                <button
-                  onClick={clearFilters}
-                  className="ml-auto flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-red-600 px-3 py-1.5 rounded-xl transition-all duration-200 font-medium text-xs"
-                >
+                <button onClick={clearFilters} className="ml-auto flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-red-600 px-3 py-1.5 rounded-xl transition-all duration-200 font-medium text-xs">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -396,7 +421,7 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         </div>
 
-        {/* ── Loading / Error ─────────────────────────────────────── */}
+        {/* ── Loading / Error ───────────────────────────────── */}
         {loading && (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div>
@@ -410,10 +435,9 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         )}
 
-        {/* ── Products Grid ───────────────────────────────────────── */}
+        {/* ── Products Grid ─────────────────────────────────── */}
         {!loading && !error && (
           <>
-            {/* Results count */}
             {products.length > 0 && (
               <p className="text-xs sm:text-sm text-gray-500 mb-3">
                 Showing {pagination.total} result{pagination.total !== 1 ? 's' : ''}
@@ -440,8 +464,6 @@ const ProductListPage = ({ userId, userRole }) => {
               <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
                 {products.map((product) => (
                   <div key={product.id} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:scale-105">
-
-                    {/* Image */}
                     <div className="relative h-40 bg-gray-200 overflow-hidden group">
                       {product.product_image ? (
                         <img src={product.product_image} alt={product.product_name} className="w-full h-full object-cover" />
@@ -451,23 +473,16 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {/* Edit/Delete for sellers */}
                       {canModifyProduct(product) && (
                         <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); navigate(`/seller/products/${product.id}/edit`); }}
-                            className="bg-white/95 backdrop-blur-sm hover:bg-blue-500 text-blue-600 hover:text-white p-2 rounded-lg shadow-lg transition-all duration-200"
-                            title="Edit Product"
-                          >
+                          <button onClick={(e) => { e.stopPropagation(); navigate(`/seller/products/${product.id}/edit`); }}
+                            className="bg-white/95 backdrop-blur-sm hover:bg-blue-500 text-blue-600 hover:text-white p-2 rounded-lg shadow-lg transition-all duration-200" title="Edit">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                               <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
                             </svg>
                           </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }}
-                            className="bg-white/95 backdrop-blur-sm hover:bg-red-500 text-red-600 hover:text-white p-2 rounded-lg shadow-lg transition-all duration-200"
-                            title="Delete Product"
-                          >
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }}
+                            className="bg-white/95 backdrop-blur-sm hover:bg-red-500 text-red-600 hover:text-white p-2 rounded-lg shadow-lg transition-all duration-200" title="Delete">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
@@ -475,28 +490,24 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {/* Status Badges */}
                       <div className="absolute top-2 left-2 flex flex-col gap-1">
                         {product.is_featured && <span className="bg-yellow-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Featured</span>}
                         {product.discount_percentage > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded">-{product.discount_percentage}%</span>}
                         {!product.is_active && <span className="bg-gray-500 text-white text-[10px] px-1.5 py-0.5 rounded">Inactive</span>}
-                        {product.approval_status === 'pending' && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded">⏳ Pending</span>}
+                        {product.approval_status === 'pending'  && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded">⏳ Pending</span>}
                         {product.approval_status === 'rejected' && <span className="bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded">❌ Rejected</span>}
                         {product.approval_status === 'approved' && <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded">✓ Approved</span>}
                       </div>
 
                       {product.stock_quantity === 0 && (
-                        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center">
                           <span className="bg-red-600 text-white px-2 py-1 rounded-lg font-semibold text-xs">OUT OF STOCK</span>
                         </div>
                       )}
                     </div>
 
-                    {/* Info */}
                     <div className="p-3">
-                      <h3 className="font-semibold text-gray-900 mb-1 text-sm truncate" title={product.product_name}>
-                        {product.product_name}
-                      </h3>
+                      <h3 className="font-semibold text-gray-900 mb-1 text-sm truncate">{product.product_name}</h3>
                       {product.category && <p className="text-[10px] text-gray-500 mb-1">{product.category}</p>}
 
                       <div className="mb-2">
@@ -529,31 +540,19 @@ const ProductListPage = ({ userId, userRole }) => {
                         </div>
                       )}
 
-                      {/* Admin approve/reject — only for pending */}
                       {currentUserRole === 'admin' && product.approval_status === 'pending' && (
                         <div className="mb-2 flex gap-1.5">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleApprove(product.id); }}
-                            className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                            Approve
+                          <button onClick={(e) => { e.stopPropagation(); handleApprove(product.id); }}
+                            className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
+                            ✓ Approve
                           </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleReject(product.id); }}
-                            className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                            </svg>
-                            Reject
+                          <button onClick={(e) => { e.stopPropagation(); handleReject(product.id); }}
+                            className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
+                            ✗ Reject
                           </button>
                         </div>
                       )}
 
-                      {/* View Details */}
                       <button
                         onClick={() => {
                           if (currentUserRole === 'admin') navigate(`/admin/products/${product.id}`);
@@ -562,10 +561,6 @@ const ProductListPage = ({ userId, userRole }) => {
                         }}
                         className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2.5 px-3 rounded-xl transition-all duration-300 text-sm font-semibold shadow-md hover:shadow-lg flex items-center justify-center gap-2"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                        </svg>
                         View Details
                       </button>
 
@@ -580,7 +575,6 @@ const ProductListPage = ({ userId, userRole }) => {
               </div>
             )}
 
-            {/* Pagination */}
             {pagination.total > pagination.limit && (
               <div className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-center justify-between bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4 gap-4 sm:gap-0">
                 <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">

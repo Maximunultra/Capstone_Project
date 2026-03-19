@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   Menu,
+   RefreshCcw,
   X
 } from 'lucide-react';
 
@@ -32,6 +33,7 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     { to: `/${rolePrefix}/products`, label: "Products", icon: <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/orders`, label: "Orders", icon: <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />, hasOrderNotification: true },
     { to: `/${rolePrefix}/promotions`, label: "Promotions", icon: <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
+    { to: `/${rolePrefix}/refunds`, label: "Refunds", icon: <RefreshCcw className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" /> },
     { to: `/${rolePrefix}/messages`, label: "Messages", icon: <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3" />, hasNotification: true },
   ];
 
