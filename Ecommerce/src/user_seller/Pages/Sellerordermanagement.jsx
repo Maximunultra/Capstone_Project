@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, DollarSign, ShoppingBag, MessageCircle, Send } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, ShoppingBag, MessageCircle, Send } from 'lucide-react';
 
 // API Base URL - Update this to your actual API endpoint
 // const API_BASE_URL = 'http://localhost:5000/api';
@@ -67,8 +67,10 @@ const SellerOrderManagement = () => {
       const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_status: selectedStatus })
-      });
+body: JSON.stringify({
+  order_status: selectedStatus,
+  seller_id:    currentUserId,
+})      });
       const data = await response.json();
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, order_status: selectedStatus } : o));
@@ -562,7 +564,7 @@ const SellerOrderManagement = () => {
                           disabled={saving}
                           className="mt-3 w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                         >
-                          <DollarSign size={18} />
+                        <span className="text-lg font-bold">₱</span>
                           {saving ? 'Saving...' : 'Save Payment Status'}
                         </button>
                       )}
