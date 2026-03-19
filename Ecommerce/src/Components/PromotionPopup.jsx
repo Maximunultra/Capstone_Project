@@ -40,28 +40,21 @@ const PromotionPopup = () => {
   }, [activePromotions]);
 
   const fetchActivePromotions = async () => {
-    try {
-      console.log('🔍 Fetching active promotions...');
-      const response = await fetch(`${API_BASE_URL}/promotions/active`);
-      if (!response.ok) throw new Error('Failed to fetch promotions');
-      
-      const data = await response.json();
-      console.log('📦 Received promotions:', data);
-      
-      // Filter only approved and currently active promotions
-      const now = new Date();
-      const active = (data.promotions || []).filter(p => 
-        p.status === 'approved' && 
-        new Date(p.start_date) <= now && 
-        new Date(p.end_date) >= now
-      );
-      
-      console.log(`✅ ${active.length} active promotions found`);
-      setActivePromotions(active);
-    } catch (error) {
-      console.error('❌ Error fetching active promotions:', error);
-    }
-  };
+  try {
+    console.log('🔍 Fetching active promotions...');
+    const response = await fetch(`${API_BASE_URL}/promotions/active`);
+    if (!response.ok) throw new Error('Failed to fetch promotions');
+ 
+    const data = await response.json();
+    console.log(`✅ ${data.promotions?.length || 0} active promotions found`);
+ 
+    // Backend already filters by status=approved AND start_date<=now AND end_date>=now
+    // Just set whatever comes back — no need to re-filter in JS
+    setActivePromotions(data.promotions || []);
+  } catch (error) {
+    console.error('❌ Error fetching active promotions:', error);
+  }
+};
 
   const handleClose = () => {
     setIsVisible(false);
