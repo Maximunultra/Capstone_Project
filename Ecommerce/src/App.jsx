@@ -8,6 +8,11 @@ import AdminLayout from "./admin/Components/Layout";
 import UsersManager from "./admin/Pages/Seller";
 import AdminAnalytics from "./admin/Pages/AdminAnalytics";  
 import AdminProductPage from "./admin/Pages/AdminProductPage";
+import SellerRegistration from "./admin/Pages/SellerRegistration";
+import CategoryRulesPage from "./admin/Pages/CategoryRulesPage";
+import AdminEditSellerPage from "./admin/Pages/AdminEditSellerPage";
+import AdminMessagesPage from "./admin/Pages/AdminMessagesPage";
+import AdminRefundsPage from "./admin/Pages/AdminRefundsPage";
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
 import LandingLayout from "./user_buyer/Components/LandingLayout";
@@ -18,6 +23,7 @@ import OrdersPage from "./user_buyer/Pages/OrdersPage";
 import OrderDetailsPage from "./user_buyer/Pages/OrderDetailsPage";
 import MessagesPage from './user_buyer/Pages/MessagesPage';
 import Profile from './user_buyer/Pages/Profile';
+import StoreProductsPage from "./user_buyer/Pages/StorePage";
 // Seller Components
 import SellerDashboard from "./user_seller/Pages/Dashboard";
 import SellerLayout from "./user_seller/Components/Layout";
@@ -25,6 +31,8 @@ import SellerOrderManagement from "./user_seller/Pages/Sellerordermanagement";
 import SellerAnalytics from "./user_seller/Pages/Selleranalytics";
 import SellerMessagesPage from "./user_seller/Pages/SellerMessagesPage";
 import ProfileSeller from "./user_seller/Pages/ProfileSeller";
+import SellerCategoryRulesPage from "./user_seller/Pages/Sellercategoryrulespage";
+import SellerRefundsPage from "./user_seller/Pages/SellerRefundsPage";
 // Shared Components
 import Login from "./Login";
 import ForgotPassword from "./Components/ForgotPassword";
@@ -96,13 +104,35 @@ axios.interceptors.response.use(
   }
 );
 
-const App = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [showSessionModal, setShowSessionModal] = useState(false); // ✅ modal state
+function getInitialAuthState() {
+  try {
+    const user = localStorage.getItem("user");
+    const token = localStorage.getItem("token");
+    if (user && token) {
+      const userData = JSON.parse(user);
+      return {
+        isAuthenticated: true,
+        userRole: userData.role || null,
+        userId: userData.id || null,
+      };
+    }
+  } catch {
+    // corrupted storage — clear it
+    localStorage.removeItem("user");
+    localStorage.removeItem("token");
+  }
+  return { isAuthenticated: false, userRole: null, userId: null };
+}
 
-  // ✅ Register modal trigger for axios interceptor
+const App = () => {
+  // ✅ Initialize from localStorage synchronously so the first render is correct
+  const initial = getInitialAuthState();
+  const [isAuthenticated, setIsAuthenticated] = useState(initial.isAuthenticated);
+  const [userRole, setUserRole]               = useState(initial.userRole);
+  const [userId, setUserId]                   = useState(initial.userId);
+  const [showSessionModal, setShowSessionModal] = useState(false);
+
+  
   useEffect(() => {
     triggerSessionModal = () => {
       setShowSessionModal(true);
@@ -113,35 +143,26 @@ const App = () => {
     return () => { triggerSessionModal = null; };
   }, []);
 
-  // ✅ Check session validity on app load
+  // ✅ Validate token with server after mount (background check — doesn't block render)
   useEffect(() => {
-    const user = localStorage.getItem("user");
     const token = localStorage.getItem("token");
+    if (!token) return;
 
-    if (user && token) {
-      const userData = JSON.parse(user);
-      setIsAuthenticated(true);
-      setUserRole(userData.role);
-      setUserId(userData.id);
-
-      console.log('🔐 Loaded user:', userData);
-
-      axios.get(`${API_URL}/api/protected/test`, {
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch((err) => {
-        if (
-          err.response?.status === 401 &&
-          err.response?.data?.code === "SESSION_INVALIDATED"
-        ) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          setIsAuthenticated(false);
-          setUserRole(null);
-          setUserId(null);
-          setShowSessionModal(true);
-        }
-      });
-    }
+    axios.get(`${API_URL}/api/protected/test`, {
+      headers: { Authorization: `Bearer ${token}` }
+    }).catch((err) => {
+      if (
+        err.response?.status === 401 &&
+        err.response?.data?.code === "SESSION_INVALIDATED"
+      ) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        setIsAuthenticated(false);
+        setUserRole(null);
+        setUserId(null);
+        setShowSessionModal(true);
+      }
+    });
   }, []);
 
   // ✅ Check session every 30 seconds
@@ -218,6 +239,11 @@ const App = () => {
                   <Route path="/users" element={<UsersManager />} />
                   <Route path="/orders" element={<SellerOrderManagement />} />
                   <Route path="/analytics" element={<AdminAnalytics />} />
+                  <Route path="/add-seller" element={<SellerRegistration />} />
+                  <Route path="/settings/category-rules" element={<CategoryRulesPage />} />
+                  <Route path="/users/edit/:id" element={<AdminEditSellerPage />} />
+                  <Route path="/messages" element={<AdminMessagesPage />} />
+                  <Route path="/refunds" element={<AdminRefundsPage />} />
                 </Routes>
               </AdminLayout>
             </PrivateRoute>
@@ -239,6 +265,8 @@ const App = () => {
                   <Route path="/analytics" element={<SellerAnalytics />} />
                   <Route path="/messages" element={<SellerMessagesPage />} />
                   <Route path="/profile" element={<ProfileSeller />} />
+                  <Route path="/category-rules" element={<SellerCategoryRulesPage />} />
+                  <Route path="/refunds" element={<SellerRefundsPage />} />
                 </Routes>
               </SellerLayout>
             </PrivateRoute>
@@ -257,6 +285,7 @@ const App = () => {
                 <Route path="/order/:orderId" element={<OrderDetailsPage />} />
                 <Route path="/profile" element={<Profile userId={userId} />} />
                 <Route path="/messages" element={<MessagesPage />} />
+                <Route path="/store/:sellerId" element={<StoreProductsPage userId={userId} userRole={userRole} />} />
               </Routes>
             </LandingLayout>
           } />
