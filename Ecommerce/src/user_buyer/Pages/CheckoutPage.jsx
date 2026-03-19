@@ -1,65 +1,89 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Truck, AlertCircle, Info, ShieldCheck, Store, Package } from 'lucide-react';
+import { Truck, AlertCircle, Store, Package, MapPin, ChevronDown, X, Check } from 'lucide-react';
 
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 // const API_BASE_URL = 'http://localhost:5000/api';
+
+async function safeJson(res) {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Server error (${res.status})`); }
+}
+
+// ✅ Format number with commas for thousands
+const formatPrice = (amount) => {
+  const num = parseFloat(amount);
+  if (isNaN(num)) return '0.00';
+  return num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 const CheckoutPage = ({ userId }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [currentStep, setCurrentStep] = useState(1);
-  const [cartItems, setCartItems] = useState([]);
-  const [allCartItems, setAllCartItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [cartItems, setCartItems]     = useState([]);
+  const [loading, setLoading]         = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
 
+  // Addresses
+  const [savedAddresses, setSavedAddresses]     = useState([]);
+  const [selectedAddress, setSelectedAddress]   = useState(null);
+  const [showAddressPicker, setShowAddressPicker] = useState(false);
+  const [addressLoading, setAddressLoading]     = useState(true);
+
   const PLATFORM_FEE_PERCENTAGE = 0.10;
-  const FIXED_SHIPPING_FEE_3PLUS = 100;
 
-  const [shippingInfo, setShippingInfo] = useState({
-    fullName: '', email: '', phone: '',
-    address: '', city: '', province: '', postalCode: '',
-  });
+  // Shipping state
+  const [shippingFee, setShippingFee]           = useState(null);
+  const [shippingZone, setShippingZone]         = useState('');
+  const [shippingLoading, setShippingLoading]   = useState(false);
+  const [shippingNote, setShippingNote]         = useState('');
 
-  // Field-level errors — same pattern as Profile.jsx
-  const [fieldErrors, setFieldErrors] = useState({});
-
-  const [paymentMethod, setPaymentMethod] = useState('');
+  const [contactInfo, setContactInfo] = useState({ fullName: '', email: '', phone: '' });
+  const [paymentMethod, setPaymentMethod]         = useState('');
   const [orderConfirmation, setOrderConfirmation] = useState(null);
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
   const steps = [
-    { id: 1, name: 'Shipping Info' },
-    { id: 2, name: 'Review' },
-    { id: 3, name: 'Payment' },
-    { id: 4, name: 'Confirmation' },
+    { id: 1, name: 'Review Order' },
+    { id: 2, name: 'Payment' },
+    { id: 3, name: 'Confirmation' },
   ];
 
-  // ── 1. Auto-fill name/email/phone from localStorage on mount ────
+  // Load contact info
   useEffect(() => {
-    const loggedInUser = JSON.parse(localStorage.getItem('user') || '{}');
-    if (loggedInUser?.full_name) {
-      setShippingInfo(prev => ({
-        ...prev,
-        fullName: loggedInUser.full_name || '',
-        email:    loggedInUser.email    || '',
-        phone:    loggedInUser.phone    || '',
-        // address / city / province / postalCode intentionally left blank
-      }));
-    }
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    setContactInfo({ fullName: u.full_name || u.name || '', email: u.email || '', phone: u.phone || '' });
   }, []);
 
-  // ── 2. Load cart items ───────────────────────────────────────────
+  // Load saved addresses
+  useEffect(() => {
+    if (!currentUserId) return;
+    (async () => {
+      setAddressLoading(true);
+      try {
+        const res  = await fetch(`${API_BASE_URL}/addresses/user/${currentUserId}`);
+        const data = await safeJson(res);
+        if (res.ok && Array.isArray(data) && data.length > 0) {
+          setSavedAddresses(data);
+          const def = data.find(a => a.is_default) || data[0];
+          setSelectedAddress(def);
+        }
+      } catch (e) { console.error('Failed to load addresses:', e); }
+      finally { setAddressLoading(false); }
+    })();
+  }, [currentUserId]);
+
+  // Load cart
   useEffect(() => {
     if (!currentUserId) { navigate('/login'); return; }
     const stateItems = location.state?.checkoutItems;
-    if (stateItems && stateItems.length > 0) {
+    if (stateItems?.length > 0) {
       setCartItems(stateItems);
       setLoading(false);
-      fetchAllCartItems();
     } else {
       fetchCartItems();
     }
@@ -68,97 +92,76 @@ const CheckoutPage = ({ userId }) => {
   const fetchCartItems = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/cart/${currentUserId}`);
+      const res  = await fetch(`${API_BASE_URL}/cart/${currentUserId}`);
       if (!res.ok) throw new Error('Failed to fetch cart');
       const data = await res.json();
       setCartItems(data.cart_items || []);
-      setAllCartItems(data.cart_items || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
-  const fetchAllCartItems = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/cart/${currentUserId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setAllCartItems(data.cart_items || []);
-    } catch (e) { console.error(e); }
-  };
+  const getTotalWeightKg = useCallback(() => {
+    return cartItems.reduce((total, item) => {
+      const weight = parseFloat(item.product?.weight || 0);
+      const unit   = (item.product?.weight_unit || 'g').toLowerCase();
+      const weightKg = unit === 'kg' ? weight : weight / 1000;
+      return total + (weightKg * item.quantity);
+    }, 0);
+  }, [cartItems]);
 
-  // ── Derived state ────────────────────────────────────────────────
-  const checkoutSellerId = location.state?.sellerId || null;
+  const fetchShippingFee = useCallback(async (address, items) => {
+    if (!address?.province || !items?.length) { setShippingFee(null); setShippingZone(''); return; }
+    const totalWeightKg = items.reduce((total, item) => {
+      const weight = parseFloat(item.product?.weight || 0);
+      const unit   = (item.product?.weight_unit || 'g').toLowerCase();
+      const weightKg = unit === 'kg' ? weight : weight / 1000;
+      return total + (weightKg * item.quantity);
+    }, 0);
+    const weightToSend = Math.max(totalWeightKg, 0.1);
+    setShippingLoading(true);
+    setShippingNote('');
+    try {
+      const params = new URLSearchParams({ province: address.province, weight_kg: weightToSend.toFixed(3) });
+      const res  = await fetch(`${API_BASE_URL}/shipping/calculate?${params}`);
+      const data = await safeJson(res);
+      if (res.ok && data.success) {
+        setShippingFee(parseFloat(data.fee));
+        setShippingZone(data.zone || '');
+        if (data.note) setShippingNote(data.note);
+      } else {
+        setShippingFee(150);
+        setShippingZone('');
+        setShippingNote('Could not calculate exact rate, estimated fee applied');
+      }
+    } catch (e) {
+      setShippingFee(150);
+      setShippingNote('Network error, estimated fee applied');
+    } finally {
+      setShippingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedAddress && cartItems.length > 0) fetchShippingFee(selectedAddress, cartItems);
+  }, [selectedAddress, cartItems, fetchShippingFee]);
+
+  // Derived
+  const checkoutSellerId   = location.state?.sellerId || null;
   const checkoutSellerName =
     cartItems[0]?.product?.seller_name ||
     cartItems[0]?.product?.brand ||
     (checkoutSellerId ? `Seller ${checkoutSellerId.slice(0, 6)}` : null);
 
-  const remainingItems = allCartItems.filter(ai => !cartItems.some(ci => ci.id === ai.id));
-  const hasRemainingItems = remainingItems.length > 0;
-
-  // ── Price helpers ────────────────────────────────────────────────
-  const getTotalProducts  = () => cartItems.reduce((s, i) => s + i.quantity, 0);
-  const getRawShipping    = () => cartItems.reduce((s, i) => s + parseFloat(i.product?.shipping_fee || 50) * i.quantity, 0);
-  const calculateSubtotal = () => cartItems.reduce((s, i) => s + (i.price || i.product?.price || 0) * i.quantity, 0).toFixed(2);
+  const getTotalProducts     = () => cartItems.reduce((s, i) => s + i.quantity, 0);
+  const calculateSubtotal    = () => cartItems.reduce((s, i) => s + (i.price || i.product?.price || 0) * i.quantity, 0).toFixed(2);
   const calculatePlatformFee = () => (parseFloat(calculateSubtotal()) * PLATFORM_FEE_PERCENTAGE).toFixed(2);
-  const calculateShippingFee = () => getTotalProducts() >= 3 ? FIXED_SHIPPING_FEE_3PLUS.toFixed(2) : getRawShipping().toFixed(2);
-  const isFixedShippingApplied = () => getTotalProducts() >= 3;
-  const getShippingSavings = () => {
-    if (!isFixedShippingApplied()) return 0;
-    const s = getRawShipping() - FIXED_SHIPPING_FEE_3PLUS;
-    return s > 0 ? s.toFixed(2) : '0.00';
-  };
+  const calculateShippingFee = () => { if (shippingFee === null) return '0.00'; return parseFloat(shippingFee).toFixed(2); };
   const calculateTotal = () => (parseFloat(calculateSubtotal()) + parseFloat(calculatePlatformFee()) + parseFloat(calculateShippingFee())).toFixed(2);
 
-  // ── Phone validation helpers (same as Profile.jsx) ───────────────
-  const getPhoneStatus = () => {
-    if (!shippingInfo.phone) return null;
-    return shippingInfo.phone.length === 11 && shippingInfo.phone.startsWith('09') ? 'valid' : 'invalid';
-  };
-
-  // ── Full form validation ─────────────────────────────────────────
-  const validateShippingForm = () => {
-    const errors = {};
-    if (!shippingInfo.fullName.trim())
-      errors.fullName = 'Full name is required';
-    if (!shippingInfo.email.trim())
-      errors.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(shippingInfo.email))
-      errors.email = 'Please enter a valid email address';
-    if (!shippingInfo.phone.trim())
-      errors.phone = 'Phone number is required';
-    else if (shippingInfo.phone.length !== 11)
-      errors.phone = 'Phone number must be exactly 11 digits';
-    else if (!shippingInfo.phone.startsWith('09'))
-      errors.phone = 'Phone number must start with 09 (e.g. 09XXXXXXXXX)';
-    if (!shippingInfo.address.trim())
-      errors.address = 'Barangay / address is required';
-    if (!shippingInfo.city.trim())
-      errors.city = 'City is required';
-    if (!shippingInfo.province.trim())
-      errors.province = 'Province is required';
-    return errors;
-  };
-
-  // ── Input change handler ─────────────────────────────────────────
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    // Phone: digits only, max 11 — same as Profile.jsx
-    if (name === 'phone') {
-      const digits = value.replace(/\D/g, '');
-      if (digits.length <= 11) setShippingInfo(prev => ({ ...prev, phone: digits }));
-      if (fieldErrors.phone) setFieldErrors(prev => ({ ...prev, phone: '' }));
-      return;
-    }
-    setShippingInfo(prev => ({ ...prev, [name]: value }));
-    if (fieldErrors[name]) setFieldErrors(prev => ({ ...prev, [name]: '' }));
-  };
-
-  // ── Delivery estimate ────────────────────────────────────────────
   const getDeliveryEstimate = (city = '', fromDate = new Date()) => {
     const isLegazpi = city.trim().toLowerCase().replace(/\s+/g, '') === 'legazpicity' || city.trim().toLowerCase() === 'legazpi';
     const base = new Date(fromDate);
-    const fmt = d => d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+    const fmt  = d => d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
     if (isLegazpi) {
       const t = new Date(base), tm = new Date(base);
       tm.setDate(tm.getDate() + 1);
@@ -173,67 +176,54 @@ const CheckoutPage = ({ userId }) => {
     if (!city) return null;
     const est = getDeliveryEstimate(city, orderDate);
     return (
-      <div className={`rounded-lg p-4 border flex gap-3 ${est.isLocal ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
-        <span className="text-xl">{est.isLocal ? '🏠' : '🚚'}</span>
+      <div className={`rounded-lg p-3 border flex gap-3 ${est.isLocal ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+        <span className="text-lg">{est.isLocal ? '🏠' : '🚚'}</span>
         <div>
           <p className={`text-sm font-semibold ${est.isLocal ? 'text-green-800' : 'text-blue-800'}`}>Estimated Delivery: {est.label}</p>
           <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-700' : 'text-blue-700'}`}>Expected: {est.range}</p>
-          <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-600' : 'text-blue-600'}`}>{est.isLocal ? '📍 Within Legazpi City — same/next day' : '📦 Outside Legazpi City — standard delivery'}</p>
         </div>
       </div>
     );
   };
 
-  const RemainingItemsNotice = () => {
-    if (!hasRemainingItems) return null;
-    const groups = {};
-    remainingItems.forEach(item => {
-      const sid = item.product?.user_id || 'unknown';
-      const sname = item.product?.seller_name || item.product?.brand || `Seller ${sid.slice(0, 6)}`;
-      if (!groups[sid]) groups[sid] = { sellerName: sname, count: 0 };
-      groups[sid].count += item.quantity;
-    });
+  const ShippingFeeBanner = () => {
+    if (!selectedAddress?.province) return null;
+    if (shippingLoading) {
+      return (
+        <div className="rounded-lg p-4 border bg-gray-50 border-gray-200 flex gap-3 items-center">
+          <div className="w-4 h-4 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin shrink-0" />
+          <p className="text-sm text-gray-600">Calculating shipping fee for {selectedAddress.province}...</p>
+        </div>
+      );
+    }
+    if (shippingFee === null) return null;
+    const totalWeightKg = getTotalWeightKg();
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-        <div className="flex gap-3">
-          <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-800">You have remaining items in your cart</p>
-            <p className="text-sm text-amber-700 mt-1">After this order, return to checkout items from:</p>
-            <ul className="mt-2 space-y-1">
-              {Object.values(groups).map((g, i) => (
-                <li key={i} className="text-sm text-amber-700 flex items-center gap-2">
-                  <Store className="w-3 h-3" /><strong>{g.sellerName}</strong> — {g.count} item{g.count !== 1 ? 's' : ''}
-                </li>
-              ))}
-            </ul>
-          </div>
+      <div className="rounded-lg p-4 border bg-blue-50 border-blue-200 flex gap-3">
+        <Truck className="w-5 h-5 text-blue-500 mt-0.5 shrink-0" />
+        <div className="text-sm">
+          <p className="font-semibold text-blue-800">Shipping to {selectedAddress.province}{shippingZone ? ` · ${shippingZone}` : ''}</p>
+          <p className="mt-0.5 text-blue-700">₱{formatPrice(shippingFee)} — based on {totalWeightKg > 0 ? `${totalWeightKg.toFixed(2)}kg` : 'estimated weight'}</p>
+          {shippingNote && <p className="mt-1 text-xs text-blue-600 italic">{shippingNote}</p>}
         </div>
       </div>
     );
   };
 
-  // ── Step navigation ──────────────────────────────────────────────
-  const handleShippingSubmit = (e) => {
-    e.preventDefault();
-    const errors = validateShippingForm();
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
-      // Scroll to first error field
-      const firstKey = Object.keys(errors)[0];
-      document.getElementsByName(firstKey)[0]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-    setFieldErrors({});
-    setCurrentStep(2);
-  };
+  const buildShippingInfo = () => ({
+    fullName:   selectedAddress?.full_name  || contactInfo.fullName,
+    email:      contactInfo.email,
+    phone:      selectedAddress?.phone      || contactInfo.phone,
+    address:    selectedAddress?.street     || '',
+    city:       selectedAddress?.city       || '',
+    province:   selectedAddress?.province   || '',
+    postalCode: selectedAddress?.zip_code   || '',
+  });
 
-  const handleContinueToPayment = () => {
-    if (getTotalProducts() >= 3 && parseFloat(calculateShippingFee()) !== FIXED_SHIPPING_FEE_3PLUS) {
-      alert('Shipping fee error. Please refresh and try again.');
-      return;
-    }
-    setCurrentStep(3);
+  const handleProceedToPayment = () => {
+    if (!selectedAddress) { alert('Please select a delivery address before proceeding.'); return; }
+    if (shippingLoading) { alert('Please wait while the shipping fee is being calculated.'); return; }
+    setCurrentStep(2);
   };
 
   const handlePaymentSubmit = async () => {
@@ -247,34 +237,122 @@ const CheckoutPage = ({ userId }) => {
   };
 
   const initiatePayMongoPayment = async () => {
+    const si = buildShippingInfo();
     try {
       setProcessingPayment(true);
       const totalAmount = Math.round(parseFloat(calculateTotal()) * 100);
       if (totalAmount < 10000) { alert('Minimum order amount for online payment is ₱100.00'); setProcessingPayment(false); return; }
       const res = await fetch(`${API_BASE_URL}/payment/create-payment`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: totalAmount, payment_method: paymentMethod, currency: 'PHP', description: `Order for ${shippingInfo.fullName}`, billing: { name: shippingInfo.fullName, email: shippingInfo.email, phone: shippingInfo.phone, address: { line1: shippingInfo.address, city: shippingInfo.city, state: shippingInfo.province, postal_code: shippingInfo.postalCode, country: 'PH' } } })
+        body: JSON.stringify({
+          amount: totalAmount, payment_method: paymentMethod, currency: 'PHP',
+          description: `Order for ${si.fullName}`,
+          billing: { name: si.fullName, email: si.email, phone: si.phone, address: { line1: si.address, city: si.city, state: si.province, postal_code: si.postalCode, country: 'PH' } }
+        })
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to create payment'); }
       const data = await res.json();
       if (data.checkout_url) {
-        localStorage.setItem('pendingOrder', JSON.stringify({ user_id: currentUserId, shipping_info: shippingInfo, payment_method: paymentMethod, cart_items: cartItems, seller_id: checkoutSellerId, subtotal: calculateSubtotal(), tax: calculatePlatformFee(), shipping_fee: calculateShippingFee(), total: calculateTotal(), payment_intent_id: data.payment_intent_id }));
+        localStorage.setItem('pendingOrder', JSON.stringify({
+          user_id: currentUserId, shipping_info: si, payment_method: paymentMethod,
+          cart_items: cartItems, seller_id: checkoutSellerId,
+          subtotal: calculateSubtotal(), tax: calculatePlatformFee(),
+          shipping_fee: calculateShippingFee(), total: calculateTotal(),
+          payment_intent_id: data.payment_intent_id
+        }));
         window.location.href = data.checkout_url;
       }
     } catch (e) { alert('Failed to process payment: ' + e.message); setProcessingPayment(false); }
   };
 
+  // ✅ CHECKPOINT 2: Final stock verification before submitting order
   const processOrder = async (paymentIntentId = null) => {
+    const si = buildShippingInfo();
+
+    // Stock check before submitting
+    setLoading(true);
+    try {
+      const stockErrors = [];
+
+      await Promise.all(cartItems.map(async (item) => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/products/${item.product_id}`);
+          if (!res.ok) {
+            stockErrors.push(`"${item.product?.product_name || 'A product'}" is no longer available.`);
+            return;
+          }
+          const data = await res.json();
+          const product = data.product || data;
+
+          if (!product.is_active) {
+            stockErrors.push(`"${product.product_name}" was removed by the seller.`);
+          } else if (product.stock_quantity < item.quantity) {
+            stockErrors.push(
+              product.stock_quantity === 0
+                ? `"${product.product_name}" just sold out.`
+                : `"${product.product_name}" only has ${product.stock_quantity} left (you ordered ${item.quantity}).`
+            );
+          }
+        } catch {
+          stockErrors.push(`Could not verify "${item.product?.product_name || 'a product'}". Please try again.`);
+        }
+      }));
+
+      if (stockErrors.length > 0) {
+        alert('⚠️ Cannot place order:\n\n' + stockErrors.join('\n') + '\n\nYou will be taken back to your cart to update your items.');
+        navigate('/buyer/cart');
+        return;
+      }
+    } catch (e) {
+      alert('Could not verify stock availability. Please try again.');
+      return;
+    } finally {
+      setLoading(false);
+    }
+
+    // ✅ Stock verified — now submit the order
     try {
       setLoading(true);
-      const orderData = { user_id: currentUserId, seller_id: checkoutSellerId, shipping_info: shippingInfo, payment_method: paymentMethod, cart_items: cartItems, subtotal: calculateSubtotal(), tax: calculatePlatformFee(), shipping_fee: calculateShippingFee(), total: calculateTotal(), payment_intent_id: paymentIntentId, payment_status: paymentMethod === 'cod' ? 'pending' : 'paid' };
-      const res = await fetch(`${API_BASE_URL}/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(orderData) });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to process order'); }
+      const orderData = {
+        user_id: currentUserId, seller_id: checkoutSellerId, shipping_info: si,
+        payment_method: paymentMethod, cart_items: cartItems,
+        subtotal: calculateSubtotal(), tax: calculatePlatformFee(),
+        shipping_fee: calculateShippingFee(), total: calculateTotal(),
+        payment_intent_id: paymentIntentId,
+        payment_status: paymentMethod === 'cod' ? 'pending' : 'paid'
+      };
+
+      const res = await fetch(`${API_BASE_URL}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderData)
+      });
+
+      if (!res.ok) {
+        const e = await res.json();
+        // Handle backend atomic stock failure (race condition caught at DB level)
+        if (e.stock_errors?.length > 0) {
+          alert('⚠️ Stock changed during checkout:\n\n' + e.stock_errors.join('\n') + '\n\nReturning to your cart.');
+          navigate('/buyer/cart');
+        } else {
+          alert(e.error || 'Failed to process order. Please try again.');
+        }
+        return;
+      }
+
       const data = await res.json();
-      setOrderConfirmation({ orderNumber: data.order.order_number, orderId: data.order.id, date: new Date(data.order.order_date).toLocaleDateString(), ...orderData });
-      setCurrentStep(4);
-    } catch (e) { alert('Failed to process order. Please try again.'); }
-    finally { setLoading(false); }
+      setOrderConfirmation({
+        orderNumber: data.order.order_number,
+        orderId: data.order.id,
+        date: new Date(data.order.order_date).toLocaleDateString(),
+        ...orderData
+      });
+      setCurrentStep(3);
+    } catch (e) {
+      alert('Failed to process order. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -283,7 +361,7 @@ const CheckoutPage = ({ userId }) => {
       const pending = localStorage.getItem('pendingOrder');
       if (pending) {
         const od = JSON.parse(pending);
-        setShippingInfo(od.shipping_info); setPaymentMethod(od.payment_method); setCartItems(od.cart_items);
+        setPaymentMethod(od.payment_method); setCartItems(od.cart_items);
         if (p.get('payment_method') === 'paypal' && p.get('token')) processPayPalOrder(od, p.get('token'));
         else if (p.get('payment_intent_id')) processOrderWithData(od, p.get('payment_intent_id'));
         localStorage.removeItem('pendingOrder');
@@ -299,11 +377,11 @@ const CheckoutPage = ({ userId }) => {
       if (!cr.ok) throw new Error('Failed to capture PayPal payment');
       const cd = await cr.json();
       const rd = { ...od, payment_method: 'paypal', payment_intent_id: token, payment_capture_id: cd.capture_id, payment_status: 'paid' };
-      const r = await fetch(`${API_BASE_URL}/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rd) });
+      const r  = await fetch(`${API_BASE_URL}/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rd) });
       if (!r.ok) throw new Error('Failed to process order');
       const d = await r.json();
       setOrderConfirmation({ orderNumber: d.order.order_number, orderId: d.order.id, date: new Date(d.order.order_date).toLocaleDateString(), ...rd });
-      setCurrentStep(4);
+      setCurrentStep(3);
     } catch (e) { alert('Failed to process PayPal payment: ' + e.message); }
     finally { setLoading(false); }
   };
@@ -312,29 +390,17 @@ const CheckoutPage = ({ userId }) => {
     try {
       setLoading(true);
       const rd = { ...od, payment_intent_id: paymentIntentId, payment_status: od.payment_method === 'cod' ? 'pending' : 'paid' };
-      const r = await fetch(`${API_BASE_URL}/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rd) });
+      const r  = await fetch(`${API_BASE_URL}/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rd) });
       if (!r.ok) throw new Error('Failed to process order');
       const d = await r.json();
       setOrderConfirmation({ orderNumber: d.order.order_number, orderId: d.order.id, date: new Date(d.order.order_date).toLocaleDateString(), ...rd });
-      setCurrentStep(4);
+      setCurrentStep(3);
     } catch (e) { alert('Failed to create order: ' + e.message); }
     finally { setLoading(false); }
   };
 
-  // ── Derived values ───────────────────────────────────────────────
   const totalProducts   = getTotalProducts();
-  const rawShipping     = getRawShipping();
   const meetsMinPayment = parseFloat(calculateTotal()) >= 100;
-  const fixedApplied    = isFixedShippingApplied();
-  const shippingSavings = getShippingSavings();
-
-  // ── Reusable helpers ─────────────────────────────────────────────
-  const FieldError = ({ name }) => fieldErrors[name]
-    ? <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><AlertCircle className="w-3 h-3 flex-shrink-0" />{fieldErrors[name]}</p>
-    : null;
-
-  const inputClass = (name) =>
-    `w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition-all ${fieldErrors[name] ? 'border-red-400 bg-red-50' : 'border-gray-300'}`;
 
   if (loading) {
     return (
@@ -347,12 +413,14 @@ const CheckoutPage = ({ userId }) => {
     );
   }
 
+  const si = buildShippingInfo();
+
   return (
     <div className="min-h-screen bg-white">
 
       {/* Progress Bar */}
       <div className="bg-gray-50 border-b border-gray-200 py-8">
-        <div className="max-w-4xl mx-auto px-6">
+        <div className="max-w-3xl mx-auto px-6">
           <div className="flex items-center justify-between">
             {steps.map((step, i) => (
               <React.Fragment key={step.id}>
@@ -364,7 +432,9 @@ const CheckoutPage = ({ userId }) => {
                   </div>
                   <span className={`mt-2 text-sm font-medium ${currentStep >= step.id ? 'text-green-600' : 'text-gray-500'}`}>{step.name}</span>
                 </div>
-                {i < steps.length - 1 && <div className={`flex-1 h-1 mx-4 transition-all ${currentStep > step.id ? 'bg-green-500' : 'bg-gray-300'}`} />}
+                {i < steps.length - 1 && (
+                  <div className={`flex-1 h-1 mx-4 transition-all ${currentStep > step.id ? 'bg-green-500' : 'bg-gray-300'}`} />
+                )}
               </React.Fragment>
             ))}
           </div>
@@ -373,341 +443,316 @@ const CheckoutPage = ({ userId }) => {
 
       <div className="max-w-6xl mx-auto px-6 py-12">
 
-        {/* ══ STEP 1: Shipping ══ */}
+        {/* STEP 1: Order Review */}
         {currentStep === 1 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-6">
+              <h2 className="text-3xl font-bold text-gray-900">Order Review</h2>
 
-              {/* Seller banner */}
               {checkoutSellerName && (
-                <div className="mb-4 flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
                   <Store className="w-5 h-5 text-green-600 flex-shrink-0" />
                   <div>
-                    <p className="text-sm text-green-700">Checking out products from:</p>
+                    <p className="text-sm text-green-700">Checking out from:</p>
                     <p className="font-bold text-green-900">{checkoutSellerName}</p>
                   </div>
                 </div>
               )}
 
-              {/* Auto-fill notice */}
-              <div className="mb-6 flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-blue-800">Some fields have been auto-filled from your account</p>
-                  <p className="text-sm text-blue-700 mt-0.5">Please complete your <strong>delivery address</strong> below.</p>
+              {/* Delivery Address Card */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-bold text-gray-700 uppercase tracking-wide">Delivery Address</span>
                 </div>
+
+                {addressLoading ? (
+                  <div className="px-5 py-6 flex items-center gap-3 text-gray-500">
+                    <svg className="animate-spin h-4 w-4 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    <span className="text-sm">Loading addresses...</span>
+                  </div>
+                ) : selectedAddress ? (
+                  <div className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        {selectedAddress.label && (
+                          <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                            {selectedAddress.label === 'Home' ? '🏠' : selectedAddress.label === 'Work' ? '🏢' : '📍'} {selectedAddress.label}
+                          </span>
+                        )}
+                        {selectedAddress.is_default && <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">✓ Default</span>}
+                      </div>
+                      <p className="font-bold text-gray-900">{selectedAddress.full_name}</p>
+                      <p className="text-sm text-gray-600">{selectedAddress.phone}</p>
+                      <p className="text-sm text-gray-600 mt-0.5">{selectedAddress.street}, {selectedAddress.city}, {selectedAddress.province} {selectedAddress.zip_code}</p>
+                    </div>
+                    {/* ✅ Only show Change button if there are multiple saved addresses to switch between */}
+                    {savedAddresses.length > 1 && (
+                      <button type="button" onClick={() => setShowAddressPicker(true)}
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-green-500 text-green-600 text-sm font-semibold hover:bg-green-50 transition">
+                        <ChevronDown className="w-4 h-4" />Change
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="px-5 py-6 text-center">
+                    <p className="text-sm text-gray-500 mb-3">No saved address found.</p>
+                    <button type="button" onClick={() => navigate('/buyer/profile?tab=addresses')} className="text-sm text-green-600 underline font-semibold hover:text-green-800">+ Add a delivery address</button>
+                  </div>
+                )}
               </div>
 
-              <RemainingItemsNotice />
-
-              <h2 className="text-3xl font-bold text-gray-900 mb-6">Shipping Information</h2>
-
-              <form onSubmit={handleShippingSubmit} className="space-y-6" noValidate>
-
-                {/* ── Account info (auto-filled) ── */}
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-4">
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                    Account Info
-                    <span className="normal-case font-normal text-gray-400 ml-1">(auto-filled — you can still edit)</span>
-                  </p>
-
-                  {/* Full Name */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Full Name <span className="text-red-500">*</span>
-                    </label>
-                    <input type="text" name="fullName" value={shippingInfo.fullName} onChange={handleInputChange}
-                      className={inputClass('fullName')} placeholder="Juan Dela Cruz" />
-                    <FieldError name="fullName" />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Email */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Email <span className="text-red-500">*</span>
-                      </label>
-                      <input type="email" name="email" value={shippingInfo.email} onChange={handleInputChange}
-                        className={inputClass('email')} placeholder="juan@email.com" />
-                      <FieldError name="email" />
-                    </div>
-
-                    {/* Phone — live validation identical to Profile.jsx */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Phone Number <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="tel"
-                          name="phone"
-                          value={shippingInfo.phone}
-                          onChange={handleInputChange}
-                          inputMode="numeric"
-                          maxLength={11}
-                          placeholder="09XXXXXXXXX"
-                          className={`w-full px-4 py-3 pr-14 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition-all ${
-                            fieldErrors.phone
-                              ? 'border-red-400 bg-red-50'
-                              : getPhoneStatus() === 'valid'
-                              ? 'border-green-400 bg-green-50'
-                              : 'border-gray-300'
-                          }`}
-                        />
-                        <span className={`absolute right-3 top-3.5 text-xs font-semibold pointer-events-none ${shippingInfo.phone.length === 11 ? 'text-green-600' : 'text-gray-400'}`}>
-                          {shippingInfo.phone.length}/11
-                        </span>
+              {/* Address Picker Modal */}
+              {showAddressPicker && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)' }} onClick={() => setShowAddressPicker(false)} />
+                  <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '28rem' }} className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-green-600" />
+                        <span className="font-bold text-gray-900">Select Address</span>
                       </div>
-
-                      {/* Live checklist — same as Profile.jsx */}
-                      {shippingInfo.phone.length > 0 && (
-                        <div className="mt-1.5 space-y-0.5">
-                          <div className={`flex items-center gap-1 text-xs ${shippingInfo.phone.startsWith('09') ? 'text-green-600' : 'text-red-500'}`}>
-                            <span>{shippingInfo.phone.startsWith('09') ? '✓' : '✗'}</span>
-                            <span>Starts with 09</span>
-                          </div>
-                          <div className={`flex items-center gap-1 text-xs ${shippingInfo.phone.length === 11 ? 'text-green-600' : 'text-red-500'}`}>
-                            <span>{shippingInfo.phone.length === 11 ? '✓' : '✗'}</span>
-                            <span>Exactly 11 digits ({shippingInfo.phone.length} entered)</span>
-                          </div>
-                        </div>
-                      )}
-                      <FieldError name="phone" />
+                      <button onClick={() => setShowAddressPicker(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
+                      {savedAddresses.map(addr => {
+                        const isSelected = selectedAddress?.id === addr.id;
+                        return (
+                          <button key={addr.id} type="button" onClick={() => { setSelectedAddress(addr); setShowAddressPicker(false); }}
+                            className={`w-full text-left p-4 rounded-xl border-2 transition-all ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'}`}>
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'border-green-500 bg-green-500' : 'border-gray-300'}`}>
+                                {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  {addr.label && (
+                                    <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                                      {addr.label === 'Home' ? '🏠' : addr.label === 'Work' ? '🏢' : '📍'} {addr.label}
+                                    </span>
+                                  )}
+                                  {addr.is_default && <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">✓ Default</span>}
+                                </div>
+                                <p className="font-semibold text-gray-900 text-sm">{addr.full_name}</p>
+                                <p className="text-xs text-gray-500">{addr.phone}</p>
+                                <p className="text-xs text-gray-600 mt-0.5">{addr.street}, {addr.city}, {addr.province} {addr.zip_code}</p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
+              )}
 
-                {/* ── Delivery address (must fill) ── */}
-                <div className="bg-white border-2 border-green-200 rounded-xl p-5 space-y-4">
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                    Delivery Address
-                    <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full normal-case font-semibold">Please fill in</span>
-                  </p>
-
-                  {/* Barangay */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Barangay / Street Address <span className="text-red-500">*</span>
-                    </label>
-                    <input type="text" name="address" value={shippingInfo.address} onChange={handleInputChange}
-                      className={inputClass('address')} placeholder="e.g. Brgy. Bigaa, 123 Rizal St." />
-                    <FieldError name="address" />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* City */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        City <span className="text-red-500">*</span>
-                      </label>
-                      <input type="text" name="city" value={shippingInfo.city} onChange={handleInputChange}
-                        className={inputClass('city')} placeholder="e.g. Legazpi City" />
-                      <FieldError name="city" />
-                    </div>
-
-                    {/* Province */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Province <span className="text-red-500">*</span>
-                      </label>
-                      <input type="text" name="province" value={shippingInfo.province} onChange={handleInputChange}
-                        className={inputClass('province')} placeholder="e.g. Albay" />
-                      <FieldError name="province" />
-                    </div>
-
-                    {/* Postal Code */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Postal Code</label>
-                      <input type="text" name="postalCode" value={shippingInfo.postalCode} onChange={handleInputChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition-all"
-                        placeholder="e.g. 4500" />
-                    </div>
-                  </div>
+              {/* Order Items */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-gray-600" />
+                  <span className="text-sm font-bold text-gray-700 uppercase tracking-wide">Order Items</span>
+                  <span className="ml-auto text-xs text-gray-500">{totalProducts} item{totalProducts !== 1 ? 's' : ''}</span>
                 </div>
-
-                <button type="submit" className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold text-lg shadow-lg">
-                  Continue to Review
-                </button>
-              </form>
-            </div>
-
-            {/* Sidebar */}
-            <div>
-              <div className="bg-gray-50 rounded-lg p-6 sticky top-6">
-                <h3 className="font-bold text-gray-900 mb-4">📦 Items in this order</h3>
-                <div className="space-y-3 mb-5">
+                <div className="divide-y divide-gray-100">
                   {cartItems.map(item => (
-                    <div key={item.id} className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-white rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
+                    <div key={item.id} className="p-4 flex gap-4">
+                      <div className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
                         {item.product?.product_image
                           ? <img src={item.product.product_image} alt={item.product.product_name} className="w-full h-full object-cover" />
-                          : <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-gray-300" /></div>}
+                          : <div className="w-full h-full flex items-center justify-center"><Package className="w-7 h-7 text-gray-300" /></div>}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{item.product?.product_name}</p>
-                        <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
+                        <p className="font-semibold text-gray-900 text-sm leading-snug">{item.product?.product_name}</p>
+                        <p className="text-xs text-gray-500 mt-1">Qty: {item.quantity}</p>
+                        {item.product?.weight > 0 && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            Weight: {item.product.weight_unit === 'kg' ? `${item.product.weight}kg` : `${item.product.weight}g`} × {item.quantity}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 mt-2">
+                          <p className="font-bold text-gray-900">₱{formatPrice((item.price || item.product?.price || 0) * item.quantity)}</p>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
-                <div className="border-t border-gray-200 pt-4 mb-5 space-y-3 text-sm">
-                  <div className="flex gap-2"><Info className="h-4 w-4 text-blue-500 mt-0.5" /><div><p className="font-medium text-gray-900">1–2 items</p><p className="text-xs text-gray-500">Individual shipping fees apply</p></div></div>
-                  <div className="flex gap-2"><ShieldCheck className="h-4 w-4 text-green-500 mt-0.5" /><div><p className="font-medium text-gray-900">3+ items → Fixed ₱100</p><p className="text-xs text-gray-500">Flat ₱100 shipping fee</p></div></div>
-                </div>
-                {shippingInfo.city
-                  ? <div className="pt-4 border-t border-gray-200"><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">📦 Delivery Estimate</p><DeliveryBanner city={shippingInfo.city} /></div>
-                  : <div className="pt-4 border-t border-gray-200 text-center text-xs text-gray-400">Enter your city above to see delivery estimate</div>
-                }
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* ══ STEP 2: Review ══ */}
-        {currentStep === 2 && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
-              <h2 className="text-3xl font-bold text-gray-900 mb-8">Order Review</h2>
-              {checkoutSellerName && (
-                <div className="mb-4 flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                  <Store className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  <p className="text-sm font-semibold text-green-900">Seller: {checkoutSellerName}</p>
-                </div>
-              )}
-              <div className="space-y-4 mb-8">
-                {cartItems.map(item => (
-                  <div key={item.id} className="bg-gray-50 rounded-lg p-6 flex gap-4">
-                    <div className="w-24 h-24 bg-white rounded-lg overflow-hidden flex-shrink-0">
-                      {item.product?.product_image ? <img src={item.product.product_image} alt={item.product.product_name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Package className="w-8 h-8 text-gray-300" /></div>}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 mb-1">{item.product?.product_name}</h3>
-                      <p className="text-sm text-gray-600 mb-2">Qty: {item.quantity}</p>
-                      <div className="flex items-center gap-4">
-                        <p className="text-lg font-bold text-gray-900">₱{((item.price || item.product?.price || 0) * item.quantity).toFixed(2)}</p>
-                        <div className="flex items-center text-sm text-gray-500"><Truck className="w-4 h-4 mr-1" />₱{((item.product?.shipping_fee || 50) * item.quantity).toFixed(2)} shipping</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {totalProducts === 1 && <div className="mb-6 rounded-lg p-4 border bg-gray-50 border-gray-200 flex gap-3"><Info className="w-5 h-5 text-gray-500 mt-0.5" /><div className="text-sm"><p className="font-semibold text-gray-800">Individual Shipping Fee</p><p className="mt-1 text-gray-600">₱{rawShipping.toFixed(2)}</p></div></div>}
-              {totalProducts === 2 && <div className="mb-6 rounded-lg p-4 border bg-blue-50 border-blue-200 flex gap-3"><Info className="w-5 h-5 text-blue-500 mt-0.5" /><div className="text-sm"><p className="font-semibold text-blue-800">Combined Shipping Fee</p><p className="mt-1 text-blue-700">₱{rawShipping.toFixed(2)}</p></div></div>}
-              {totalProducts >= 3 && <div className={`mb-6 rounded-lg p-4 border flex gap-3 ${parseFloat(shippingSavings) > 0 ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}><ShieldCheck className={`w-5 h-5 mt-0.5 ${parseFloat(shippingSavings) > 0 ? 'text-green-500' : 'text-blue-500'}`} /><div className="text-sm"><p className={`font-semibold ${parseFloat(shippingSavings) > 0 ? 'text-green-800' : 'text-blue-800'}`}>Fixed ₱{FIXED_SHIPPING_FEE_3PLUS} Shipping Applied</p><p className={`mt-1 ${parseFloat(shippingSavings) > 0 ? 'text-green-700' : 'text-blue-700'}`}>{totalProducts} products — flat ₱{FIXED_SHIPPING_FEE_3PLUS}.{parseFloat(shippingSavings) > 0 && ` You save ₱${shippingSavings}!`}</p></div></div>}
-              <RemainingItemsNotice />
-              <div className="flex gap-4">
-                <button onClick={() => setCurrentStep(1)} className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">Back to Shipping</button>
-                <button onClick={handleContinueToPayment} className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg">Continue to Payment</button>
-              </div>
+              <ShippingFeeBanner />
+
+              <button onClick={handleProceedToPayment} disabled={!selectedAddress || shippingLoading}
+                className="w-full bg-green-500 text-white py-4 rounded-xl hover:bg-green-600 transition font-bold text-lg shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed">
+                {shippingLoading ? 'Calculating shipping...' : 'Proceed to Payment'}
+              </button>
             </div>
+
+            {/* Sidebar */}
             <div>
-              <div className="bg-gray-50 rounded-lg p-6 sticky top-6">
-                <h3 className="font-bold text-gray-900 mb-4">Shipping Details</h3>
-                <div className="space-y-1 text-sm text-gray-600 mb-6 pb-6 border-b border-gray-200">
-                  <p className="font-medium text-gray-900">{shippingInfo.fullName}</p>
-                  <p>{shippingInfo.email}</p><p>{shippingInfo.phone}</p>
-                  <p>{shippingInfo.address}</p>
-                  <p>{shippingInfo.city}, {shippingInfo.province} {shippingInfo.postalCode}</p>
-                </div>
-                <h3 className="font-bold text-gray-900 mb-4">Order Summary</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="font-medium">₱{calculateSubtotal()}</span></div>
-                  <div className="flex justify-between text-gray-600"><span>Platform Fee (10%)</span><span className="font-medium">₱{calculatePlatformFee()}</span></div>
+              <div className="bg-gray-50 rounded-xl p-6 sticky top-6 space-y-5">
+                <h3 className="font-bold text-gray-900">Order Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="font-medium">₱{formatPrice(calculateSubtotal())}</span></div>
+                  <div className="flex justify-between text-gray-600"><span>Platform Fee (10%)</span><span className="font-medium">₱{formatPrice(calculatePlatformFee())}</span></div>
                   <div className="flex justify-between text-gray-600">
-                    <div className="flex flex-col"><span>Shipping Fee</span>{totalProducts === 2 && <span className="text-xs text-blue-600">Sum of individual fees</span>}{fixedApplied && <span className="text-xs text-green-600 font-medium">Fixed flat fee (3+ items)</span>}</div>
-                    <span className="font-medium">₱{calculateShippingFee()}</span>
+                    <div className="flex flex-col">
+                      <span>Shipping Fee</span>
+                      {shippingZone && <span className="text-xs text-blue-600 font-medium">{shippingZone}</span>}
+                    </div>
+                    <span className="font-medium">{shippingLoading ? <span className="text-gray-400">Calculating...</span> : `₱${formatPrice(calculateShippingFee())}`}</span>
                   </div>
-                  <div className="border-t border-gray-200 pt-3">
-                    <div className="flex justify-between items-center"><span className="text-lg font-bold text-gray-900">Total</span><span className="text-2xl font-bold text-green-600">₱{calculateTotal()}</span></div>
+                  <div className="border-t border-gray-200 pt-3 flex justify-between items-center">
+                    <span className="font-bold text-gray-900">Total</span>
+                    <span className="text-2xl font-bold text-green-600">₱{formatPrice(calculateTotal())}</span>
                   </div>
-                  <div className="border-t border-gray-200 pt-3">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">📦 Estimated Delivery</p>
-                    <DeliveryBanner city={shippingInfo.city} />
+                </div>
+                {selectedAddress?.city && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">📦 Delivery Estimate</p>
+                    <DeliveryBanner city={selectedAddress.city} />
                   </div>
+                )}
+                <div className="border-t border-gray-200 pt-4 text-sm">
+                  <div className="flex gap-2"><AlertCircle className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" /><p className="text-xs text-gray-500">Shipping fee is automatically calculated based on your delivery province and total package weight.</p></div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ══ STEP 3: Payment ══ */}
-        {currentStep === 3 && (
+        {/* STEP 2: Payment */}
+        {currentStep === 2 && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Select Payment Method</h2>
-            {checkoutSellerName && <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-6"><Store className="w-5 h-5 text-green-600" /><p className="text-sm font-semibold text-green-900">Paying for: {checkoutSellerName}</p></div>}
-            {!meetsMinPayment && <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6"><div className="flex gap-3"><AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" /><div><p className="text-sm font-semibold text-yellow-800">Minimum Amount Required</p><p className="text-sm text-yellow-700 mt-1">Total (₱{calculateTotal()}) is below the ₱100.00 minimum for GCash/PayPal.</p></div></div></div>}
-            {fixedApplied && <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"><div className="flex gap-3"><ShieldCheck className="h-5 w-5 text-green-600 mt-0.5" /><div><p className="text-sm font-semibold text-green-800">Fixed Shipping Applied ✓</p><p className="text-sm text-green-700 mt-1">{totalProducts} products → Fixed ₱{FIXED_SHIPPING_FEE_3PLUS}.{parseFloat(shippingSavings) > 0 && ` Save ₱${shippingSavings}!`}</p></div></div></div>}
-            <div className="mb-6"><DeliveryBanner city={shippingInfo.city} /></div>
+
+            {checkoutSellerName && (
+              <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-4">
+                <Store className="w-5 h-5 text-green-600" />
+                <p className="text-sm font-semibold text-green-900">Paying for: {checkoutSellerName}</p>
+              </div>
+            )}
+
+            {selectedAddress && (
+              <div className="flex items-start gap-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 mb-4">
+                <MapPin className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0 text-sm">
+                  <p className="font-semibold text-gray-700">Delivering to:</p>
+                  <p className="text-gray-600">{selectedAddress.full_name} · {selectedAddress.phone}</p>
+                  <p className="text-gray-600">{selectedAddress.street}, {selectedAddress.city}, {selectedAddress.province}</p>
+                </div>
+                <button onClick={() => setCurrentStep(1)} className="text-xs text-green-600 underline font-semibold shrink-0">Change</button>
+              </div>
+            )}
+
+            {!meetsMinPayment && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <div className="flex gap-3"><AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" /><div><p className="text-sm font-semibold text-yellow-800">Minimum Amount Required</p><p className="text-sm text-yellow-700 mt-1">Total (₱{formatPrice(calculateTotal())}) is below ₱100.00 minimum for GCash/PayPal.</p></div></div>
+              </div>
+            )}
+
+            <div className="mb-6"><DeliveryBanner city={selectedAddress?.city} /></div>
+
             <div className="space-y-4 mb-8">
-              {[{ id: 'gcash', label: 'GCash', sub: 'Pay securely with GCash', icon: <span className="text-white font-bold text-xl">G</span>, bg: 'bg-blue-600' }, { id: 'paypal', label: 'PayPal', sub: 'Pay securely with PayPal', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944 3.72a.936.936 0 0 1 .92-.768h6.811c1.863 0 3.339.394 4.428 1.182 1.089.788 1.634 1.954 1.634 3.498 0 .844-.172 1.616-.516 2.316-.344.7-.838 1.298-1.482 1.794a6.418 6.418 0 0 1-2.271 1.078c-.885.22-1.847.33-2.886.33h-1.447l-.994 6.187a.643.643 0 0 1-.633.533z"/></svg>, bg: 'bg-blue-500' }].map(pm => (
+              {[
+                { id: 'gcash', label: 'GCash', sub: 'Pay securely with GCash', icon: <span className="text-white font-bold text-xl">G</span>, bg: 'bg-blue-600' },
+                { id: 'paypal', label: 'PayPal', sub: 'Pay securely with PayPal', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944 3.72a.936.936 0 0 1 .92-.768h6.811c1.863 0 3.339.394 4.428 1.182 1.089.788 1.634 1.954 1.634 3.498 0 .844-.172 1.616-.516 2.316-.344.7-.838 1.298-1.482 1.794a6.418 6.418 0 0 1-2.271 1.078c-.885.22-1.847.33-2.886.33h-1.447l-.994 6.187a.643.643 0 0 1-.633.533z"/></svg>, bg: 'bg-blue-500' }
+              ].map(pm => (
                 <button key={pm.id} onClick={() => setPaymentMethod(pm.id)} disabled={!meetsMinPayment}
                   className={`w-full p-6 rounded-lg border-2 transition-all ${!meetsMinPayment ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed' : paymentMethod === pm.id ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
-                  <div className="flex items-center gap-4"><div className={`w-16 h-16 ${pm.bg} rounded-lg flex items-center justify-center flex-shrink-0`}>{pm.icon}</div><div className="text-left flex-1"><h3 className="font-bold text-gray-900 text-lg">{pm.label}</h3><p className="text-sm text-gray-600">{pm.sub}</p></div>{paymentMethod === pm.id && meetsMinPayment && <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}</div>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-16 h-16 ${pm.bg} rounded-lg flex items-center justify-center flex-shrink-0`}>{pm.icon}</div>
+                    <div className="text-left flex-1"><h3 className="font-bold text-gray-900 text-lg">{pm.label}</h3><p className="text-sm text-gray-600">{pm.sub}</p></div>
+                    {paymentMethod === pm.id && meetsMinPayment && <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  </div>
                 </button>
               ))}
               <button onClick={() => setPaymentMethod('cod')} className={`w-full p-6 rounded-lg border-2 transition-all ${paymentMethod === 'cod' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300'}`}>
-                <div className="flex items-center gap-4"><div className="w-16 h-16 bg-gray-700 rounded-lg flex items-center justify-center flex-shrink-0"><svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg></div><div className="text-left flex-1"><h3 className="font-bold text-gray-900 text-lg">Cash on Delivery</h3><p className="text-sm text-gray-600">Pay when you receive your order</p></div>{paymentMethod === 'cod' && <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}</div>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-gray-700 rounded-lg flex items-center justify-center flex-shrink-0"><svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg></div>
+                  <div className="text-left flex-1"><h3 className="font-bold text-gray-900 text-lg">Cash on Delivery</h3><p className="text-sm text-gray-600">Pay when you receive your order</p></div>
+                  {paymentMethod === 'cod' && <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                </div>
               </button>
             </div>
+
             <div className="bg-gray-50 rounded-lg p-6 mb-6">
               <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>₱{calculateSubtotal()}</span></div>
-                <div className="flex justify-between text-sm text-gray-600"><span>Platform Fee (10%)</span><span>₱{calculatePlatformFee()}</span></div>
-                <div className="flex justify-between text-sm text-gray-600"><div className="flex flex-col"><span>Shipping Fee</span>{fixedApplied && <span className="text-xs text-green-600 font-medium">Fixed flat fee (3+ items)</span>}{totalProducts === 2 && <span className="text-xs text-blue-600">Sum of individual fees</span>}</div><span>₱{calculateShippingFee()}</span></div>
+                <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>₱{formatPrice(calculateSubtotal())}</span></div>
+                <div className="flex justify-between text-sm text-gray-600"><span>Platform Fee (10%)</span><span>₱{formatPrice(calculatePlatformFee())}</span></div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <div className="flex flex-col">
+                    <span>Shipping Fee</span>
+                    {shippingZone && <span className="text-xs text-blue-600 font-medium">{shippingZone} zone</span>}
+                  </div>
+                  <span>₱{formatPrice(calculateShippingFee())}</span>
+                </div>
               </div>
-              <div className="border-t pt-4"><div className="flex justify-between items-center"><span className="text-gray-600">Total Amount</span><span className="text-3xl font-bold text-green-600">₱{calculateTotal()}</span></div></div>
+              <div className="border-t pt-4"><div className="flex justify-between items-center"><span className="text-gray-600">Total Amount</span><span className="text-3xl font-bold text-green-600">₱{formatPrice(calculateTotal())}</span></div></div>
             </div>
+
             <div className="flex gap-4">
-              <button onClick={() => setCurrentStep(2)} className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">Back to Review</button>
-              <button onClick={handlePaymentSubmit} disabled={!paymentMethod || processingPayment} className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed">{processingPayment ? 'Processing...' : 'Complete Order'}</button>
+              <button onClick={() => setCurrentStep(1)} className="flex-1 bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">Back</button>
+              <button onClick={handlePaymentSubmit} disabled={!paymentMethod || processingPayment || loading}
+                className="flex-1 bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {loading ? (
+                  <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Verifying stock...</>
+                ) : processingPayment ? 'Processing...' : 'Complete Order'}
+              </button>
             </div>
           </div>
         )}
 
-        {/* ══ STEP 4: Confirmation ══ */}
-        {currentStep === 4 && orderConfirmation && (
+        {/* STEP 3: Confirmation */}
+        {currentStep === 3 && orderConfirmation && (
           <div className="max-w-2xl mx-auto text-center">
             <div className="mb-8">
-              <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4"><svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>
+              <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+              </div>
               <h2 className="text-3xl font-bold text-gray-900 mb-2">Order Confirmed!</h2>
               <p className="text-gray-600">Thank you for your purchase</p>
-              {checkoutSellerName && <div className="mt-3 inline-flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-4 py-1.5"><Store className="w-4 h-4 text-green-600" /><span className="text-sm text-green-700 font-medium">From: {checkoutSellerName}</span></div>}
+              {checkoutSellerName && (
+                <div className="mt-3 inline-flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-4 py-1.5">
+                  <Store className="w-4 h-4 text-green-600" />
+                  <span className="text-sm text-green-700 font-medium">From: {checkoutSellerName}</span>
+                </div>
+              )}
             </div>
             <div className="bg-gray-50 rounded-lg p-8 mb-8 text-left">
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div><p className="text-sm text-gray-600 mb-1">Order Number</p><p className="font-bold text-gray-900">{orderConfirmation.orderNumber}</p></div>
                 <div><p className="text-sm text-gray-600 mb-1">Order Date</p><p className="font-bold text-gray-900">{orderConfirmation.date}</p></div>
                 <div><p className="text-sm text-gray-600 mb-1">Payment Method</p><p className="font-bold text-gray-900 capitalize">{paymentMethod.replace('-', ' ')}</p></div>
-                <div><p className="text-sm text-gray-600 mb-1">Total Amount</p><p className="font-bold text-green-600 text-xl">₱{calculateTotal()}</p></div>
+                <div><p className="text-sm text-gray-600 mb-1">Total Amount</p><p className="font-bold text-green-600 text-xl">₱{formatPrice(calculateTotal())}</p></div>
               </div>
               <div className="border-t border-gray-200 pt-4 mb-4">
                 <p className="text-sm text-gray-600 mb-2">Shipping To:</p>
-                <p className="font-medium text-gray-900">{shippingInfo.fullName}</p>
-                <p className="text-sm text-gray-600">{shippingInfo.address}</p>
-                <p className="text-sm text-gray-600">{shippingInfo.city}, {shippingInfo.province} {shippingInfo.postalCode}</p>
+                <p className="font-medium text-gray-900">{si.fullName}</p>
+                <p className="text-sm text-gray-600">{si.address}</p>
+                <p className="text-sm text-gray-600">{si.city}, {si.province} {si.postalCode}</p>
               </div>
               <div className="border-t border-gray-200 pt-4 mb-4">
                 <p className="text-sm font-semibold text-gray-700 mb-2">📦 Estimated Delivery</p>
-                <DeliveryBanner city={shippingInfo.city} orderDate={new Date()} />
+                <DeliveryBanner city={si.city} orderDate={new Date()} />
               </div>
               <div className="border-t border-gray-200 pt-4">
-                <div className="flex justify-between text-sm mb-1"><span className="text-gray-600">Platform Fee</span><span>₱{orderConfirmation.tax}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Shipping Fee</span><span>₱{orderConfirmation.shipping_fee}</span></div>
+                <div className="flex justify-between text-sm mb-1"><span className="text-gray-600">Platform Fee</span><span>₱{formatPrice(orderConfirmation.tax)}</span></div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Shipping Fee {shippingZone ? `(${shippingZone})` : ''}</span>
+                  <span>₱{formatPrice(orderConfirmation.shipping_fee)}</span>
+                </div>
               </div>
             </div>
-            {hasRemainingItems && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left">
-                <div className="flex gap-3"><Info className="h-5 w-5 text-amber-600 mt-0.5" /><div><p className="text-sm font-semibold text-amber-800">You still have items in your cart!</p><p className="text-sm text-amber-700 mt-1">Return to checkout the remaining {remainingItems.reduce((s, i) => s + i.quantity, 0)} item(s) from other sellers.</p></div></div>
-              </div>
-            )}
             <div className="space-y-3">
-              {hasRemainingItems && <button onClick={() => navigate('/buyer/cart')} className="w-full bg-amber-500 text-white py-4 rounded-lg hover:bg-amber-600 transition font-semibold shadow-lg">Go to Cart (Checkout Remaining Items)</button>}
               <button onClick={() => navigate('/buyer/products')} className="w-full bg-green-500 text-white py-4 rounded-lg hover:bg-green-600 transition font-semibold shadow-lg">Continue Shopping</button>
               <button onClick={() => navigate('/buyer/cart?tab=orders')} className="w-full bg-gray-200 text-gray-700 py-4 rounded-lg hover:bg-gray-300 transition font-semibold">View My Orders</button>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
