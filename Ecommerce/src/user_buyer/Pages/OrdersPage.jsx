@@ -191,28 +191,114 @@ const ContactSupportModal = ({ userId, adminId, adminLoading, selectedOrder, onC
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REFUND ELIGIBILITY HELPER
-// A refund button shows for:
-//   1. delivered — item received but defective/wrong/etc.
-//   2. cancelled + paid online (gcash/paypal) — already charged but order was cancelled
-// COD cancelled orders don't need a refund (cash was never collected online)
+// REFUND POLICY HELPERS
+// Rules:
+//   Cancelled + paid online (GCash/PayPal) → 24 hours from cancellation time
+//   Delivered → 1–3 days (72 hours) from delivery/status change time
+//   Expired deadline → show "Cannot refund due to refund policy rules"
 // ─────────────────────────────────────────────────────────────────────────────
-const canRequestRefund = (order) => {
-  if (!order) return false;
+
+const getRefundStatus = (order) => {
+  if (!order) return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+
   const status  = order.order_status?.toLowerCase();
   const method  = order.payment_method?.toLowerCase();
   const payment = order.payment_status?.toLowerCase();
 
-  // Delivered — always eligible regardless of payment method
-  if (status === 'delivered') return true;
+  // COD cancelled — no online payment, no refund needed
+  if (status === 'cancelled' && method === 'cod') {
+    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+  }
 
-  // Cancelled + paid online — eligible for refund
-  if (status === 'cancelled' && payment === 'paid' && (method === 'gcash' || method === 'paypal')) return true;
+  // Not in a refundable state
+  if (status !== 'delivered' && status !== 'cancelled') {
+    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+  }
 
-  return false;
+  // Cancelled + not paid online
+  if (status === 'cancelled' && payment !== 'paid') {
+    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+  }
+
+  // Check deadline from order (set by backend on cancel/delivery)
+  const deadlineStr = order.refund_deadline;
+  const now = new Date();
+
+  if (deadlineStr) {
+    const deadline  = new Date(deadlineStr);
+    const msLeft    = deadline - now;
+    const hoursLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60)));
+    const expired   = msLeft <= 0;
+
+    if (status === 'cancelled') {
+      return {
+        canRefund:  !expired,
+        expired,
+        deadline,
+        hoursLeft,
+        label: expired
+          ? 'Refund request expired'
+          : `Request refund · ${hoursLeft}h left`,
+        type: 'cancellation',
+      };
+    }
+
+    if (status === 'delivered') {
+      const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+      return {
+        canRefund:  !expired,
+        expired,
+        deadline,
+        hoursLeft,
+        daysLeft,
+        label: expired
+          ? 'Refund request expired'
+          : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`,
+        type: 'delivery',
+      };
+    }
+  }
+
+  // Fallback: deadline not set yet (old orders) — use order_date estimates
+  if (status === 'cancelled' && (method === 'gcash' || method === 'paypal') && payment === 'paid') {
+    const cancelledAt = order.cancelled_at ? new Date(order.cancelled_at) : new Date(order.updated_at || order.order_date);
+    const deadline    = new Date(cancelledAt.getTime() + 24 * 60 * 60 * 1000);
+    const msLeft      = deadline - now;
+    const hoursLeft   = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60)));
+    const expired     = msLeft <= 0;
+    return {
+      canRefund: !expired, expired, deadline, hoursLeft,
+      label: expired ? 'Refund request expired' : `Request refund · ${hoursLeft}h left`,
+      type: 'cancellation',
+    };
+  }
+
+  if (status === 'delivered') {
+    const updatedAt = new Date(order.updated_at || order.order_date);
+    const deadline  = new Date(updatedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const msLeft    = deadline - now;
+    const daysLeft  = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+    const hoursLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60)));
+    const expired   = msLeft <= 0;
+    return {
+      canRefund: !expired, expired, deadline, hoursLeft, daysLeft,
+      label: expired ? 'Refund request expired' : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`,
+      type: 'delivery',
+    };
+  }
+
+  return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+};
+
+const canRequestRefund = (order) => {
+  const { canRefund, expired } = getRefundStatus(order);
+  return canRefund || expired; // show button for both — expired shows disabled state
 };
 
 const refundButtonLabel = (order) => {
+  const { label, expired, type } = getRefundStatus(order);
+  if (expired) return 'Refund Unavailable';
+  if (label) return label;
   const status = order.order_status?.toLowerCase();
   if (status === 'cancelled') return 'Request Refund for Cancelled Order';
   return 'Request Refund';
@@ -261,7 +347,7 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
                 <div>
                   <p className="font-bold text-red-800 text-sm">This will suspend your checkout</p>
                   <p className="text-xs text-red-700 mt-1">
-                    Cancelling will reach the limit of <strong>{suspension.limit} cancellations in 2 days</strong>.
+                    Cancelling will reach the limit of <strong>{suspension.limit} cancellations in 7 days</strong>.
                     Your checkout will be suspended for <strong>2 days</strong>.
                   </p>
                   <p className="text-xs text-red-500 mt-2">
@@ -366,6 +452,7 @@ const OrdersPage = ({ userId }) => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewError,      setReviewError]      = useState('');
   const [existingReviews,  setExistingReviews]  = useState({});
+  const [refundMap,        setRefundMap]         = useState({}); // order_id → refund request
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
@@ -403,9 +490,12 @@ const OrdersPage = ({ userId }) => {
       const res  = await fetch(`${API_BASE_URL}/orders/user/${currentUserId}${statusParam}`);
       if (!res.ok) throw new Error('Failed to fetch orders');
       const data = await res.json();
-      setOrders(data.orders || []);
-      if (data.orders?.length > 0 && !selectedOrder) setSelectedOrder(data.orders[0]);
-      await fetchExistingReviews(data.orders || []);
+      const orders = data.orders || [];
+      setOrders(orders);
+      if (orders.length > 0 && !selectedOrder) setSelectedOrder(orders[0]);
+      await fetchExistingReviews(orders);
+      // Fetch refund status for all orders so we can show "Refunded" badge
+      await fetchRefundStatuses(orders);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };
@@ -430,6 +520,33 @@ const OrdersPage = ({ userId }) => {
       }
       setExistingReviews(reviewsMap);
     } catch (err) { console.error('Error fetching existing reviews:', err); }
+  };
+
+  const fetchRefundStatuses = async (ordersList) => {
+    try {
+      const map = {};
+      // Fetch refund requests for orders that are eligible
+      const eligibleIds = ordersList
+        .filter(o => {
+          const s = o.order_status?.toLowerCase();
+          const m = o.payment_method?.toLowerCase();
+          const p = o.payment_status?.toLowerCase();
+          return s === 'delivered' ||
+            (s === 'cancelled' && p === 'paid' && (m === 'gcash' || m === 'paypal'));
+        })
+        .map(o => o.id);
+
+      await Promise.all(eligibleIds.map(async (orderId) => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/refunds/order/${orderId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.refund_request) map[orderId] = data.refund_request;
+          }
+        } catch { /* non-fatal */ }
+      }));
+      setRefundMap(map);
+    } catch (err) { console.error('Error fetching refund statuses:', err); }
   };
 
   const handleOpenReviewModal = (product, orderItem) => {
@@ -551,12 +668,21 @@ const OrdersPage = ({ userId }) => {
       setShowCancelModal(false);
       setCancellingOrder(null);
 
-      // Refresh orders + suspension status (cancellation may have triggered suspension)
+      // Refresh orders + suspension status
       await fetchOrders();
       await fetchSuspension();
 
-      if (data?.refund_status && data.refund_status !== 'No refund needed') {
-        alert('✅ Order cancelled. Since you paid online, you can request a refund on this order.');
+      if (data?.refund_deadline && data?.refund_status !== 'No refund needed') {
+        const deadline = new Date(data.refund_deadline);
+        const hoursLeft = Math.max(0, Math.ceil((deadline - new Date()) / (1000 * 60 * 60)));
+        alert(
+          `✅ Order cancelled.\n\n` +
+          `⏰ REFUND POLICY NOTICE:\n` +
+          `Since you paid via ${cancellingOrder?.payment_method?.toUpperCase()}, you have ` +
+          `${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''} to request a refund.\n\n` +
+          `Deadline: ${deadline.toLocaleString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}\n\n` +
+          `After this deadline, refunds will no longer be accepted per our refund policy.`
+        );
       } else {
         alert('✅ Order cancelled successfully.');
       }
@@ -693,11 +819,43 @@ const OrdersPage = ({ userId }) => {
                           {order.order_status.charAt(0).toUpperCase() + order.order_status.slice(1)}
                         </span>
                         {/* Refund eligible indicator in list */}
-                        {canRequestRefund(order) && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
-                            Refundable
-                          </span>
-                        )}
+                        {(() => {
+                          const ri     = getRefundStatus(order);
+                          const refund = refundMap[order.id];
+
+                          // Already has a refund request — show its status
+                          if (refund) {
+                            if (refund.status === 'approved') return (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                ↩ Refunded
+                              </span>
+                            );
+                            if (refund.status === 'pending' || refund.status === 'seller_pending') return (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                ⏳ Refund Pending
+                              </span>
+                            );
+                            if (refund.status === 'rejected') return (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                ✗ Refund Rejected
+                              </span>
+                            );
+                          }
+
+                          // No refund yet — show eligibility
+                          if (!ri.canRefund && !ri.expired) return null;
+                          return (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              ri.expired
+                                ? 'bg-gray-100 text-gray-400'
+                                : ri.hoursLeft <= 6
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-orange-100 text-orange-700'
+                            }`}>
+                              {ri.expired ? 'Refund expired' : ri.type === 'cancellation' ? `Refund · ${ri.hoursLeft}h` : `Refund · ${ri.daysLeft}d`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -759,21 +917,54 @@ const OrdersPage = ({ userId }) => {
 
                     {/* Cancelled notice */}
                     {selectedOrder.order_status === 'cancelled' && (
-                      <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-                        <div className="flex items-center gap-2 mb-1">
-                          <X className="w-4 h-4 text-red-600"/>
-                          <p className="font-semibold text-red-800 text-sm">Order Cancelled</p>
+                      <div className="mt-4 space-y-2">
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                          <div className="flex items-center gap-2 mb-1">
+                            <X className="w-4 h-4 text-red-600"/>
+                            <p className="font-semibold text-red-800 text-sm">Order Cancelled</p>
+                          </div>
+                          {selectedOrder.payment_status === 'paid' && (selectedOrder.payment_method === 'gcash' || selectedOrder.payment_method === 'paypal') && (
+                            <p className="text-xs text-red-700 mt-1">
+                              This order was paid via {selectedOrder.payment_method.toUpperCase()}. You may request a refund below.
+                            </p>
+                          )}
+                          {selectedOrder.payment_method === 'cod' && (
+                            <p className="text-xs text-red-700 mt-1">
+                              This was a Cash on Delivery order. No online payment was made, so no refund is required.
+                            </p>
+                          )}
                         </div>
-                        {selectedOrder.payment_status === 'paid' && (selectedOrder.payment_method === 'gcash' || selectedOrder.payment_method === 'paypal') && (
-                          <p className="text-xs text-red-700 mt-1">
-                            This order was paid via {selectedOrder.payment_method.toUpperCase()}. You may request a refund below.
-                          </p>
-                        )}
-                        {selectedOrder.payment_method === 'cod' && (
-                          <p className="text-xs text-red-700 mt-1">
-                            This was a Cash on Delivery order. No online payment was made, so no refund is required.
-                          </p>
-                        )}
+                        {/* ── 24h refund urgency notice ── */}
+                        {selectedOrder.payment_status === 'paid' &&
+                         (selectedOrder.payment_method === 'gcash' || selectedOrder.payment_method === 'paypal') && (() => {
+                          const refundInfo = getRefundStatus(selectedOrder);
+                          if (refundInfo.expired) return null; // expired notice shown in button area
+                          if (!refundInfo.hoursLeft) return null;
+                          const isUrgent = refundInfo.hoursLeft <= 6;
+                          return (
+                            <div className={`rounded-xl p-4 flex items-start gap-3 border-2 ${
+                              isUrgent ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'
+                            }`}>
+                              <svg className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                              </svg>
+                              <div>
+                                <p className={`font-bold text-sm ${isUrgent ? 'text-red-800' : 'text-amber-800'}`}>
+                                  {isUrgent ? '⚠️ Refund deadline approaching!' : '⏰ Refund request deadline'}
+                                </p>
+                                <p className={`text-xs mt-0.5 ${isUrgent ? 'text-red-700' : 'text-amber-700'}`}>
+                                  You have <strong>{refundInfo.hoursLeft} hour{refundInfo.hoursLeft !== 1 ? 's' : ''}</strong> to request a refund for this{' '}
+                                  {selectedOrder.payment_method.toUpperCase()} payment.
+                                  After that, refunds will no longer be accepted per our refund policy.
+                                </p>
+                                <p className={`text-xs mt-1 font-medium ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}>
+                                  Deadline: {refundInfo.deadline?.toLocaleString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -943,21 +1134,100 @@ const OrdersPage = ({ userId }) => {
 
                       {/* ── Refund Request Button ──────────────────────────────
                           Shows for:
-                          • delivered orders (item received, has issue)
-                          • cancelled orders paid via gcash/paypal (charged but cancelled)
-                          Does NOT show for:
-                          • cod cancelled orders (no online payment was made)
-                          • pending/processing/shipped (order still active)
+                          • delivered orders within 3 days
+                          • cancelled GCash/PayPal orders within 24 hours
+                          Expired → shows disabled "Cannot refund" message
                       ─────────────────────────────────────────────────────── */}
-                      {canRequestRefund(selectedOrder) && (
-                        <button onClick={() => setShowRefundModal(true)}
-                          className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl border-2 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 transition font-semibold text-sm">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-                          </svg>
-                          {refundButtonLabel(selectedOrder)}
-                        </button>
-                      )}
+                      {canRequestRefund(selectedOrder) && (() => {
+                        const refundInfo = getRefundStatus(selectedOrder);
+                        const refund     = refundMap[selectedOrder.id];
+
+                        // ── Already has a refund request — show its status ────
+                        if (refund?.status === 'approved') return (
+                          <div className="w-full flex items-center gap-3 py-3 px-6 rounded-xl border-2 border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                            </svg>
+                            <div>
+                              <p>Refund Approved</p>
+                              <p className="text-xs text-green-600 font-normal mt-0.5">₱{parseFloat(refund.refund_amount||0).toFixed(2)} has been refunded to your account</p>
+                            </div>
+                          </div>
+                        );
+                        if (refund?.status === 'pending' || refund?.status === 'seller_pending') return (
+                          <div className="w-full flex items-center gap-3 py-3 px-6 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 text-sm font-semibold">
+                            <div className="w-4 h-4 border-2 border-blue-400 border-t-blue-700 rounded-full animate-spin flex-shrink-0"/>
+                            <div>
+                              <p>{refund.status === 'seller_pending' ? 'Awaiting Seller Confirmation' : 'Refund Under Review'}</p>
+                              <p className="text-xs text-blue-600 font-normal mt-0.5">₱{parseFloat(refund.refund_amount||0).toFixed(2)} · We'll notify you once processed</p>
+                            </div>
+                          </div>
+                        );
+                        if (refund?.status === 'rejected') return (
+                          <div className="w-full flex items-center gap-3 py-3 px-6 rounded-xl border-2 border-red-200 bg-red-50 text-red-700 text-sm font-semibold">
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                            <div>
+                              <p>Refund Request Rejected</p>
+                              {refund.admin_notes && <p className="text-xs text-red-600 font-normal mt-0.5">Reason: {refund.admin_notes}</p>}
+                            </div>
+                          </div>
+                        );
+
+                        // ── No refund yet — show button or expired notice ─────
+                        return (
+                          <div>
+                            {/* Expired state */}
+                            {refundInfo.expired ? (
+                              <div className="w-full flex flex-col gap-2 py-3 px-6 rounded-xl border-2 border-gray-200 bg-gray-50">
+                                <div className="flex items-center justify-center gap-2 text-gray-400">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                  </svg>
+                                  <span className="font-semibold text-sm">Cannot refund due to refund policy rules</span>
+                                </div>
+                                <p className="text-xs text-gray-400 text-center">
+                                  {refundInfo.type === 'cancellation'
+                                    ? 'Refund requests for cancelled orders must be submitted within 24 hours of cancellation.'
+                                    : 'Refund requests for delivered orders must be submitted within 3 days of delivery.'}
+                                </p>
+                              </div>
+                            ) : (
+                              /* Active refund button with countdown */
+                              <div>
+                                <button
+                                  onClick={() => setShowRefundModal(true)}
+                                  className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl border-2 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 transition font-semibold text-sm">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+                                  </svg>
+                                  {refundButtonLabel(selectedOrder)}
+                                </button>
+                                {/* Policy countdown */}
+                                <div className={`mt-2 px-4 py-2 rounded-lg flex items-center gap-2 ${
+                                  refundInfo.hoursLeft <= 6 ? 'bg-red-50 border border-red-100' : 'bg-amber-50 border border-amber-100'
+                                }`}>
+                                  <svg className={`w-3.5 h-3.5 flex-shrink-0 ${refundInfo.hoursLeft <= 6 ? 'text-red-500' : 'text-amber-500'}`}
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                  </svg>
+                                  <p className={`text-xs font-medium ${refundInfo.hoursLeft <= 6 ? 'text-red-700' : 'text-amber-700'}`}>
+                                    {refundInfo.type === 'cancellation'
+                                      ? `Refund policy: submit within 24h of cancellation · `
+                                      : `Refund policy: submit within 3 days of delivery · `}
+                                    <strong>
+                                      {refundInfo.type === 'delivery' && refundInfo.daysLeft > 1
+                                        ? `${refundInfo.daysLeft} days remaining`
+                                        : `${refundInfo.hoursLeft}h remaining`}
+                                    </strong>
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Contact Support — active orders */}
                       {canMessageSeller(selectedOrder) && (
@@ -1070,7 +1340,7 @@ const OrdersPage = ({ userId }) => {
           order={selectedOrder}
           userId={currentUserId}
           onClose={() => setShowRefundModal(false)}
-          onSubmitted={fetchOrders}
+          onSubmitted={() => { fetchOrders(); }}
         />
       )}
 
