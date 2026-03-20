@@ -35,7 +35,7 @@ const Productlistpage = ({ userId, userRole }) => {
 
   const [suspension, setSuspension] = useState(null);
 
-  const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
+  const currentUserId   = userId   || JSON.parse(localStorage.getItem('user') || '{}').id;
   const currentUserRole = userRole || JSON.parse(localStorage.getItem('user') || '{}').role;
 
   const handleStoreClick = (e, sellerId) => {
@@ -52,27 +52,27 @@ const Productlistpage = ({ userId, userRole }) => {
   }, [currentUserId]);
 
   const categories = [
-    { id: 'all', label: 'All' },
-    { id: 'Accessories', label: 'Accessories' },
+    { id: 'all',        label: 'All' },
+    { id: 'Accessories',label: 'Accessories' },
     { id: 'Home Decor', label: 'Home Decor' },
-    { id: 'Kitchen', label: 'Kitchen' },
-    { id: 'Clothing', label: 'Clothing' },
+    { id: 'Kitchen',    label: 'Kitchen' },
+    { id: 'Clothing',   label: 'Clothing' },
   ];
 
   const priceRanges = [
-    { id: 'all', label: 'All Prices', min: 0, max: Infinity },
-    { id: 'under1000', label: 'Under ₱1,000', min: 0, max: 1000 },
-    { id: '1000-1500', label: '₱1,000 - ₱1,500', min: 1000, max: 1500 },
-    { id: '1500-2000', label: '₱1,500 - ₱2,000', min: 1500, max: 2000 },
-    { id: 'over2000', label: 'Over ₱2,000', min: 2000, max: Infinity },
+    { id: 'all',       label: 'All Prices',       min: 0,    max: Infinity },
+    { id: 'under1000', label: 'Under ₱1,000',      min: 0,    max: 1000 },
+    { id: '1000-1500', label: '₱1,000 - ₱1,500',  min: 1000, max: 1500 },
+    { id: '1500-2000', label: '₱1,500 - ₱2,000',  min: 1500, max: 2000 },
+    { id: 'over2000',  label: 'Over ₱2,000',       min: 2000, max: Infinity },
   ];
 
   const sortOptions = [
-    { id: 'featured', label: 'Featured' },
-    { id: 'newest', label: 'Newest First' },
-    { id: 'price-low', label: 'Price: Low to High' },
+    { id: 'featured',   label: 'Featured' },
+    { id: 'newest',     label: 'Newest First' },
+    { id: 'price-low',  label: 'Price: Low to High' },
     { id: 'price-high', label: 'Price: High to Low' },
-    { id: 'popular', label: 'Most Popular' },
+    { id: 'popular',    label: 'Most Popular' },
   ];
 
   const getStoreName = (users) => {
@@ -80,19 +80,18 @@ const Productlistpage = ({ userId, userRole }) => {
     return users.store_name || users.full_name || null;
   };
 
-  // ── Price formatting ─────────────────────────────────────────────────────
+  // ── Price helpers ────────────────────────────────────────────
   const formatPrice = (value) =>
     parseFloat(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const calculateDiscountedPrice = (price, discount) =>
-    (!discount || discount === 0)
-      ? formatPrice(price)
-      : formatPrice(price - (price * discount / 100));
+  // ✅ Use backend-computed fields — respects discount start/end dates
+  const isDiscountActive = (p) => p.discount_active === true;
+
+  const getEffectivePrice = (p) =>
+    formatPrice(p.effective_price ?? p.price);
 
   const getProductPrice = (p) =>
-    p.discount_percentage > 0
-      ? parseFloat(p.price - (p.price * p.discount_percentage / 100))
-      : parseFloat(p.price);
+    parseFloat(p.effective_price ?? p.price);
 
   const getTotalPrice = () =>
     !selectedProduct ? '0.00' : formatPrice(getProductPrice(selectedProduct) * quantity);
@@ -125,11 +124,11 @@ const Productlistpage = ({ userId, userRole }) => {
 
       let sortedProducts = data.products || [];
       switch (sortBy) {
-        case 'newest':    sortedProducts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); break;
-        case 'price-low': sortedProducts.sort((a, b) => a.price - b.price); break;
-        case 'price-high':sortedProducts.sort((a, b) => b.price - a.price); break;
-        case 'popular':   sortedProducts.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0)); break;
-        default:          sortedProducts.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0)); break;
+        case 'newest':     sortedProducts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); break;
+        case 'price-low':  sortedProducts.sort((a, b) => a.price - b.price); break;
+        case 'price-high': sortedProducts.sort((a, b) => b.price - a.price); break;
+        case 'popular':    sortedProducts.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0)); break;
+        default:           sortedProducts.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0)); break;
       }
 
       setProducts(sortedProducts);
@@ -250,7 +249,7 @@ const Productlistpage = ({ userId, userRole }) => {
       const cartResponse = await fetch(`${API_BASE_URL}/cart/${currentUserId}`);
       if (!cartResponse.ok) throw new Error('Failed to fetch cart');
       const cartData = await cartResponse.json();
-      const allCartItems = cartData.cart_items || [];
+      const allCartItems    = cartData.cart_items || [];
       const currentSellerId = selectedProduct.user_id;
       const otherSellerItems = allCartItems.filter(item => item.product?.user_id && item.product.user_id !== currentSellerId);
       const thisSellerItems  = allCartItems.filter(item => item.product?.user_id === currentSellerId);
@@ -258,7 +257,7 @@ const Productlistpage = ({ userId, userRole }) => {
       if (otherSellerItems.length > 0) {
         const otherSellers = {};
         otherSellerItems.forEach(item => {
-          const sid = item.product.user_id;
+          const sid   = item.product.user_id;
           const sname = item.product.seller_name || item.product.brand || `Seller ${sid.slice(0, 6)}`;
           if (!otherSellers[sid]) otherSellers[sid] = { name: sname, count: 0 };
           otherSellers[sid].count += item.quantity;
@@ -430,7 +429,7 @@ const Productlistpage = ({ userId, userRole }) => {
               />
               {searchQuery && (
                 <button onClick={() => { setSearchQuery(''); setPagination(prev => ({ ...prev, offset: 0 })); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a69c8e] hover:text-[#4a4238] transition p-0.5" title="Clear search">
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a69c8e] hover:text-[#4a4238] transition p-0.5">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -447,7 +446,7 @@ const Productlistpage = ({ userId, userRole }) => {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              Searching products and stores for <strong className="text-[#4a4238] ml-1">"{searchQuery}"</strong>
+              Searching for <strong className="text-[#4a4238] ml-1">"{searchQuery}"</strong>
             </p>
           )}
         </div>
@@ -535,7 +534,8 @@ const Productlistpage = ({ userId, userRole }) => {
                     )}
                     <div className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 flex flex-col gap-1">
                       {product.is_featured && <span className="bg-yellow-500 text-white text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-medium">Featured</span>}
-                      {product.discount_percentage > 0 && <span className="bg-red-500 text-white text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-medium">-{product.discount_percentage}%</span>}
+                      {/* ✅ Only show discount badge when discount is actually active */}
+                      {isDiscountActive(product) && <span className="bg-red-500 text-white text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-medium">-{product.discount_percentage}%</span>}
                     </div>
                     {product.stock_quantity === 0 && (
                       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center">
@@ -561,16 +561,15 @@ const Productlistpage = ({ userId, userRole }) => {
                         </button>
                       )}
                       {product.description && (
-                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2 min-h-[28px] sm:min-h-[32px]" title={product.description}>
-                          {product.description}
-                        </p>
+                        <p className="text-[10px] sm:text-xs text-gray-600 mb-1.5 sm:mb-2 line-clamp-2 min-h-[28px] sm:min-h-[32px]">{product.description}</p>
                       )}
                       {product.category && <p className="text-[10px] sm:text-xs text-gray-500 mb-1.5 sm:mb-2 truncate">{product.category}</p>}
 
+                      {/* ✅ Price display using backend discount_active + effective_price */}
                       <div className="mb-2 sm:mb-3">
-                        {product.discount_percentage > 0 ? (
+                        {isDiscountActive(product) ? (
                           <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
-                            <span className="text-sm sm:text-base md:text-lg font-semibold text-gray-900">₱{calculateDiscountedPrice(product.price, product.discount_percentage)}</span>
+                            <span className="text-sm sm:text-base md:text-lg font-semibold text-gray-900">₱{getEffectivePrice(product)}</span>
                             <span className="text-[10px] sm:text-xs md:text-sm text-gray-400 line-through">₱{formatPrice(product.price)}</span>
                           </div>
                         ) : (
@@ -666,9 +665,10 @@ const Productlistpage = ({ userId, userRole }) => {
                     </p>
                   )}
                   {selectedProduct.category && <p className="text-xs sm:text-sm text-gray-500 mb-2">{selectedProduct.category}</p>}
-                  {selectedProduct.discount_percentage > 0 ? (
+                  {/* ✅ Modal price uses discount_active + effective_price */}
+                  {isDiscountActive(selectedProduct) ? (
                     <div className="flex items-baseline gap-1.5 flex-wrap">
-                      <span className="text-lg sm:text-xl font-bold text-green-600">₱{calculateDiscountedPrice(selectedProduct.price, selectedProduct.discount_percentage)}</span>
+                      <span className="text-lg sm:text-xl font-bold text-green-600">₱{getEffectivePrice(selectedProduct)}</span>
                       <span className="text-xs sm:text-sm text-gray-400 line-through">₱{formatPrice(selectedProduct.price)}</span>
                     </div>
                   ) : (
@@ -690,7 +690,7 @@ const Productlistpage = ({ userId, userRole }) => {
                       onChange={(e) => {
                         const val = e.target.value.replace(/[^0-9]/g, '');
                         setQuantityDraft(val);
-                        const stock = selectedProduct?.stock_quantity ?? 1;
+                        const stock  = selectedProduct?.stock_quantity ?? 1;
                         const parsed = parseInt(val, 10);
                         if (val === '' || parsed < 1) setQuantityError('Please enter a quantity of at least 1.');
                         else if (parsed > stock) setQuantityError(`Only ${stock} item${stock !== 1 ? 's' : ''} available in stock.`);
@@ -698,7 +698,7 @@ const Productlistpage = ({ userId, userRole }) => {
                       }}
                       onBlur={() => {
                         const parsed = parseInt(quantityDraft, 10);
-                        const stock = selectedProduct?.stock_quantity ?? 1;
+                        const stock  = selectedProduct?.stock_quantity ?? 1;
                         if (!isNaN(parsed) && parsed >= 1 && parsed <= stock) { setQuantity(parsed); setQuantityError(''); }
                         setQuantityDraft(null);
                       }}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Upload, DollarSign, Package, Tag, Star,
+  Upload, Banknote, Package, Tag, Star,
   AlertCircle, CheckCircle, Weight,
   ChevronDown, Info, XCircle, Clock, Calendar
 } from 'lucide-react';
@@ -12,20 +12,20 @@ const WEIGHT_UNITS = ['g', 'kg', 'lbs'];
 
 const ProductForm = ({ userId, userRole, onSuccess }) => {
   const [formData, setFormData] = useState({
-    product_name:         '',
-    description:          '',
-    price:                '',
-    stock_quantity:       '',
-    category:             '',
-    material:             '',
-    discount_percentage:  '',
-    discount_start_date:  '',   // ★ NEW
-    discount_end_date:    '',   // ★ NEW
-    weight:               '',
-    weight_unit:          'g',
-    is_active:            true,
-    is_featured:          false,
-    tags:                 ''
+    product_name:        '',
+    description:         '',
+    price:               '',
+    stock_quantity:      '',
+    category:            '',
+    material:            '',
+    discount_percentage: '',
+    discount_start_date: '',
+    discount_end_date:   '',
+    weight:              '',
+    weight_unit:         'g',
+    is_active:           true,
+    is_featured:         false,
+    tags:                ''
   });
 
   const [mainImage,        setMainImage]        = useState(null);
@@ -33,10 +33,9 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
   const [loading,          setLoading]          = useState(false);
   const [errors,           setErrors]           = useState({});
   const [approvalResult,   setApprovalResult]   = useState(null);
-
-  const [categories,   setCategories]   = useState([]);
-  const [categoryRule, setCategoryRule] = useState(null);
-  const [loadingCats,  setLoadingCats]  = useState(true);
+  const [categories,       setCategories]       = useState([]);
+  const [categoryRule,     setCategoryRule]     = useState(null);
+  const [loadingCats,      setLoadingCats]      = useState(true);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -57,7 +56,6 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
     if (!formData.category) { setCategoryRule(null); return; }
     const rule = categories.find(c => c.category === formData.category);
     setCategoryRule(rule || null);
-    // Reset material when category changes
     setFormData(prev => ({ ...prev, material: '' }));
   }, [formData.category, categories]);
 
@@ -96,60 +94,43 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
     reader.readAsDataURL(file);
   };
 
-  // Today's date in YYYY-MM-DD format for min attribute on date inputs
   const today = new Date().toISOString().split('T')[0];
 
   const validateForm = () => {
     const e = {};
-
-    // ── Required fields (except discount & tags) ─────────────
-    if (!formData.product_name.trim())
-      e.product_name    = 'Product name is required';
-
-    if (!formData.description.trim())
-      e.description     = 'Description is required';
-
-    if (!formData.category)
-      e.category        = 'Please select a category';
-
-    if (!formData.material)
-      e.material        = 'Material is required';
-
-    if (!formData.price || parseFloat(formData.price) <= 0)
-      e.price           = 'Valid price is required';
-
+    if (!formData.product_name.trim())  e.product_name  = 'Product name is required';
+    if (!formData.description.trim())   e.description   = 'Description is required';
+    if (!formData.category)             e.category      = 'Please select a category';
+    if (!formData.material)             e.material      = 'Material is required';
+    if (!formData.price || parseFloat(formData.price) <= 0) {
+      e.price = 'Valid price is required';
+    } else if (categoryRule) {
+      const p = parseFloat(formData.price);
+      if (categoryRule.min_price !== null && p < categoryRule.min_price)
+        e.price = `Price must be at least ₱${categoryRule.min_price.toLocaleString()} for this category`;
+      else if (categoryRule.max_price !== null && p > categoryRule.max_price)
+        e.price = `Price must not exceed ₱${categoryRule.max_price.toLocaleString()} for this category`;
+    }
     if (formData.stock_quantity === '' || formData.stock_quantity === null || formData.stock_quantity === undefined)
-      e.stock_quantity  = 'Stock quantity is required';
+      e.stock_quantity = 'Stock quantity is required';
     else if (parseInt(formData.stock_quantity) < 0)
-      e.stock_quantity  = 'Stock quantity cannot be negative';
-
+      e.stock_quantity = 'Stock quantity cannot be negative';
     if (!formData.weight || parseFloat(formData.weight) <= 0)
-      e.weight          = 'Weight is required';
-    else if (parseFloat(formData.weight) < 0)
-      e.weight          = 'Weight cannot be negative';
+      e.weight = 'Weight is required';
+    if (!mainImage) e.mainImage = 'Product image is required';
 
-    if (!mainImage)
-      e.mainImage       = 'Product image is required';
-
-    // ── Discount (optional — but if entered, validate fully) ──
     if (formData.discount_percentage) {
       const disc = parseFloat(formData.discount_percentage);
-      if (disc < 0 || disc > 100)
-        e.discount_percentage = 'Discount must be between 0 and 100';
-
+      if (disc < 0 || disc > 100) e.discount_percentage = 'Discount must be between 0 and 100';
       if (disc > 0) {
-        if (!formData.discount_start_date)
-          e.discount_start_date = 'Start date is required when a discount is set';
-        if (!formData.discount_end_date)
-          e.discount_end_date   = 'End date is required when a discount is set';
+        if (!formData.discount_start_date) e.discount_start_date = 'Start date is required when a discount is set';
+        if (!formData.discount_end_date)   e.discount_end_date   = 'End date is required when a discount is set';
       }
     }
-
     if (formData.discount_start_date && formData.discount_end_date) {
       if (new Date(formData.discount_end_date) <= new Date(formData.discount_start_date))
         e.discount_end_date = 'End date must be after the start date';
     }
-
     return e;
   };
 
@@ -181,29 +162,26 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
       const hasDiscount  = formData.discount_percentage && parseFloat(formData.discount_percentage) > 0;
 
       const productData = {
-        user_id:              userId,
-        product_name:         formData.product_name,
-        description:          formData.description || null,
-        price:                parseFloat(formData.price),
-        stock_quantity:       parseInt(formData.stock_quantity) || 0,
-        category:             formData.category || null,
-        material:             formData.material || null,
-        brand:                formData.material || null,  // keep brand in sync for auto-approval
-        product_image:        mainImageUrl,
-        images:               null,
-        is_active:            formData.is_active,
-        is_featured:          formData.is_featured,
-        discount_percentage:  parseFloat(formData.discount_percentage) || 0,
-        // Only send dates if a discount is actually set
-        discount_start_date:  hasDiscount && formData.discount_start_date
-                                ? new Date(formData.discount_start_date).toISOString()
-                                : null,
-        discount_end_date:    hasDiscount && formData.discount_end_date
-                                ? new Date(formData.discount_end_date).toISOString()
-                                : null,
-        weight:               formData.weight ? parseFloat(formData.weight) : null,
-        weight_unit:          formData.weight_unit || 'g',
-        tags:                 tagsArray.length > 0 ? tagsArray : null
+        user_id:             userId,
+        product_name:        formData.product_name,
+        description:         formData.description || null,
+        price:               parseFloat(formData.price),
+        stock_quantity:      parseInt(formData.stock_quantity) || 0,
+        category:            formData.category || null,
+        material:            formData.material || null,
+        brand:               formData.material || null,
+        product_image:       mainImageUrl,
+        images:              null,
+        is_active:           formData.is_active,
+        is_featured:         formData.is_featured,
+        discount_percentage: parseFloat(formData.discount_percentage) || 0,
+        discount_start_date: hasDiscount && formData.discount_start_date
+                               ? new Date(formData.discount_start_date).toISOString() : null,
+        discount_end_date:   hasDiscount && formData.discount_end_date
+                               ? new Date(formData.discount_end_date).toISOString() : null,
+        weight:              formData.weight ? parseFloat(formData.weight) : null,
+        weight_unit:         formData.weight_unit || 'g',
+        tags:                tagsArray.length > 0 ? tagsArray : null
       };
 
       const response = await fetch(`${API_BASE_URL}/products`, {
@@ -212,18 +190,26 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
         body:    JSON.stringify(productData)
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create product');
+      // ✅ Always parse JSON first
+      const responseData = await response.json();
+
+      // ✅ 409 = same seller duplicate — show inline error, don't throw
+      if (response.status === 409) {
+        setErrors({ submit: responseData.error });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
       }
 
-      const createdProduct = await response.json();
+      if (!response.ok) throw new Error(responseData.error || 'Failed to create product');
 
+      // ✅ Success — set approval result (use responseData, not createdProduct)
       setApprovalResult({
-        status:  createdProduct.approval_status,
-        message: createdProduct._approval_message || ''
+        status:  responseData.approval_status,
+        message: responseData._approval_message || '',
+        similar: responseData._similar_products || null
       });
 
+      // Reset form
       setFormData({
         product_name:'', description:'', price:'', stock_quantity:'',
         category:'', material:'', discount_percentage:'',
@@ -233,7 +219,8 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
       setMainImage(null);
       setMainImagePreview(null);
 
-      if (onSuccess) onSuccess(createdProduct);
+      // ✅ Pass responseData (not createdProduct) to parent callback
+      if (onSuccess) onSuccess(responseData);
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (error) {
@@ -245,27 +232,71 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
     }
   };
 
-  // ── Approval result banner ───────────────────────────────────
+  // ── Approval result banner ────────────────────────────────────
+  // ✅ Fixed: config and c are now properly defined inside the component
   const ApprovalBanner = () => {
     if (!approvalResult) return null;
+
     const config = {
-      approved: { bg:'bg-green-50 border-green-200',  icon:<CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0"/>,  title:'Product Approved!', color:'text-green-700'  },
-      rejected: { bg:'bg-red-50 border-red-200',      icon:<XCircle     className="h-5 w-5 text-red-600 flex-shrink-0"/>,    title:'Product Rejected',  color:'text-red-700'    },
-      pending:  { bg:'bg-yellow-50 border-yellow-200',icon:<Clock       className="h-5 w-5 text-yellow-600 flex-shrink-0"/>, title:'Under Review',      color:'text-yellow-700' }
+      approved: {
+        bg:    'bg-green-50 border-green-200',
+        icon:  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />,
+        title: 'Product Approved!',
+        color: 'text-green-700'
+      },
+      rejected: {
+        bg:    'bg-red-50 border-red-200',
+        icon:  <XCircle className="h-5 w-5 text-red-600 flex-shrink-0" />,
+        title: 'Product Rejected',
+        color: 'text-red-700'
+      },
+      pending: {
+        bg:    'bg-yellow-50 border-yellow-200',
+        icon:  <Clock className="h-5 w-5 text-yellow-600 flex-shrink-0" />,
+        title: 'Under Review',
+        color: 'text-yellow-700'
+      }
     };
+
     const c = config[approvalResult.status] || config.pending;
+
     return (
-      <div className={`mb-6 p-4 border rounded-lg flex items-start gap-3 ${c.bg}`}>
-        {c.icon}
-        <div>
-          <p className={`font-semibold ${c.color}`}>{c.title}</p>
-          <p className={`text-sm mt-0.5 ${c.color}`}>{approvalResult.message}</p>
+      <div className={`mb-6 p-4 border rounded-lg ${c.bg}`}>
+        <div className="flex items-start gap-3">
+          {c.icon}
+          <div className="flex-1">
+            <p className={`font-semibold ${c.color}`}>{c.title}</p>
+            <p className={`text-sm mt-0.5 ${c.color}`}>{approvalResult.message}</p>
+          </div>
         </div>
+
+        {/* ✅ Cross-seller soft warning */}
+        {approvalResult.similar?.length > 0 && (
+          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-yellow-800">Similar products from other sellers</p>
+                <p className="text-xs text-yellow-700 mt-0.5 mb-2">
+                  Your product was created successfully. Consider differentiating it:
+                </p>
+                {approvalResult.similar.map(p => (
+                  <p key={p.id} className="text-xs text-yellow-800">
+                    • <span className="font-medium">{p.product_name}</span>
+                    {p.users?.store_name && (
+                      <span className="text-yellow-600"> — {p.users.store_name}</span>
+                    )}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
-  // ── Category rule hint ───────────────────────────────────────
+  // ── Category rule hint ────────────────────────────────────────
   const CategoryHint = () => {
     if (!categoryRule) return null;
     return (
@@ -291,7 +322,6 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
     );
   };
 
-  // Whether a discount is currently entered
   const hasDiscount = formData.discount_percentage && parseFloat(formData.discount_percentage) > 0;
 
   return (
@@ -300,9 +330,20 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
 
       <ApprovalBanner />
 
+      {/* ✅ Submit error (same-seller duplicate or other errors) */}
+      {errors.submit && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-red-800">Cannot create product</p>
+            <p className="text-sm text-red-700 mt-0.5">{errors.submit}</p>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-6">
 
-        {/* ── Product Image ──────────────────────────────────── */}
+        {/* Product Image */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Product Image *</label>
           <div className="flex items-center space-x-4">
@@ -333,27 +374,25 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           <p className="text-xs text-gray-500 mt-2">Recommended: Square image, at least 500×500px, max 5MB</p>
         </div>
 
-        {/* ── Product Name ───────────────────────────────────── */}
+        {/* Product Name */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
           <input type="text" name="product_name" value={formData.product_name}
             onChange={handleInputChange} placeholder="Enter product name"
-            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-              ${errors.product_name ? 'border-red-400' : 'border-gray-300'}`} />
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.product_name ? 'border-red-400' : 'border-gray-300'}`} />
           {errors.product_name && <p className="text-red-500 text-sm mt-1">{errors.product_name}</p>}
         </div>
 
-        {/* ── Description ────────────────────────────────────── */}
+        {/* Description */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
           <textarea name="description" value={formData.description} onChange={handleInputChange}
             rows="4" placeholder="Enter product description"
-            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-              ${errors.description ? 'border-red-400' : 'border-gray-300'}`} />
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.description ? 'border-red-400' : 'border-gray-300'}`} />
           {errors.description && <p className="text-red-500 text-sm mt-1">{errors.description}</p>}
         </div>
 
-        {/* ── Category + Brand ───────────────────────────────── */}
+        {/* Category + Material */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
@@ -363,9 +402,7 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
                 className={`w-full px-3 py-2 pr-9 border rounded-md appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white
                   ${errors.category ? 'border-red-400' : 'border-gray-300'}
                   ${loadingCats ? 'opacity-60 cursor-wait' : ''}`}>
-                <option value="">
-                  {loadingCats ? 'Loading categories…' : '— Select category —'}
-                </option>
+                <option value="">{loadingCats ? 'Loading categories…' : '— Select category —'}</option>
                 {categories.map(c => (
                   <option key={c.category} value={c.category}>{c.category}</option>
                 ))}
@@ -379,20 +416,14 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Material *</label>
             <div className="relative">
-              <select
-                name="material"
-                value={formData.material}
-                onChange={handleInputChange}
+              <select name="material" value={formData.material} onChange={handleInputChange}
                 disabled={!formData.category || !categoryRule?.allowed_materials?.length}
                 className={`w-full px-3 py-2 pr-9 border rounded-md appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white
                   ${errors.material ? 'border-red-400' : 'border-gray-300'}
-                  ${!formData.category ? 'opacity-60 cursor-not-allowed' : ''}`}
-              >
+                  ${!formData.category ? 'opacity-60 cursor-not-allowed' : ''}`}>
                 <option value="">
-                  {!formData.category
-                    ? 'Select a category first'
-                    : !categoryRule?.allowed_materials?.length
-                    ? 'No material restriction'
+                  {!formData.category ? 'Select a category first'
+                    : !categoryRule?.allowed_materials?.length ? 'No material restriction'
                     : '— Select material —'}
                 </option>
                 {categoryRule?.allowed_materials?.map(m => (
@@ -408,21 +439,23 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           </div>
         </div>
 
-        {/* ── Price + Stock ──────────────────────────────────── */}
+        {/* Price + Stock */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Price * (₱)</label>
             <div className="relative">
-              <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Banknote className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <input type="number" name="price" value={formData.price} onChange={handleInputChange}
                 step="0.01" min="0" placeholder="0.00"
-                className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-                  ${errors.price ? 'border-red-400' : 'border-gray-300'}`} />
+                className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.price ? 'border-red-400' : 'border-gray-300'}`} />
             </div>
             {errors.price && <p className="text-red-500 text-sm mt-1">{errors.price}</p>}
-            {categoryRule?.min_price != null && categoryRule?.max_price != null && (
-              <p className="text-xs text-amber-600 mt-1">
-                Accepted range: ₱{categoryRule.min_price.toLocaleString()} – ₱{categoryRule.max_price.toLocaleString()}
+            {categoryRule && (categoryRule.min_price != null || categoryRule.max_price != null) && (
+              <p className={`text-xs mt-1 ${errors.price ? 'text-red-500 font-medium' : 'text-amber-600'}`}>
+                Accepted range:{' '}
+                {categoryRule.min_price != null ? `₱${categoryRule.min_price.toLocaleString()}` : 'Any'}
+                {' – '}
+                {categoryRule.max_price != null ? `₱${categoryRule.max_price.toLocaleString()}` : 'Any'}
               </p>
             )}
           </div>
@@ -433,17 +466,14 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
               <Package className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <input type="number" name="stock_quantity" value={formData.stock_quantity}
                 onChange={handleInputChange} min="0" placeholder="0"
-                className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-                  ${errors.stock_quantity ? 'border-red-400' : 'border-gray-300'}`} />
+                className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.stock_quantity ? 'border-red-400' : 'border-gray-300'}`} />
             </div>
             {errors.stock_quantity && <p className="text-red-500 text-sm mt-1">{errors.stock_quantity}</p>}
           </div>
         </div>
 
-        {/* ── Discount Section ───────────────────────────────── */}
-        <div className={`rounded-xl border-2 p-4 transition-colors duration-200
-          ${hasDiscount ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
-
+        {/* Discount Section */}
+        <div className={`rounded-xl border-2 p-4 transition-colors duration-200 ${hasDiscount ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
           <div className="flex items-center gap-2 mb-3">
             <Tag className={`w-4 h-4 ${hasDiscount ? 'text-orange-500' : 'text-gray-400'}`} />
             <span className="text-sm font-semibold text-gray-700">Discount Settings</span>
@@ -454,62 +484,37 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
             )}
           </div>
 
-          {/* Discount % */}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Discount Percentage (%)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Discount Percentage (%)</label>
             <input type="number" name="discount_percentage" value={formData.discount_percentage}
               onChange={handleInputChange} step="0.01" min="0" max="100" placeholder="0"
-              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-                ${errors.discount_percentage ? 'border-red-400' : 'border-gray-300'} bg-white`} />
+              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${errors.discount_percentage ? 'border-red-400' : 'border-gray-300'}`} />
             {errors.discount_percentage && <p className="text-red-500 text-sm mt-1">{errors.discount_percentage}</p>}
           </div>
 
-          {/* Date range — only shown when discount > 0 */}
           {hasDiscount && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  <Calendar className="w-3.5 h-3.5 inline mr-1 text-orange-500" />
-                  Start Date *
+                  <Calendar className="w-3.5 h-3.5 inline mr-1 text-orange-500" />Start Date *
                 </label>
-                <input
-                  type="date"
-                  name="discount_start_date"
-                  value={formData.discount_start_date}
-                  onChange={handleInputChange}
-                  min={today}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white
-                    ${errors.discount_start_date ? 'border-red-400' : 'border-gray-300'}`}
-                />
-                {errors.discount_start_date && (
-                  <p className="text-red-500 text-xs mt-1">{errors.discount_start_date}</p>
-                )}
+                <input type="date" name="discount_start_date" value={formData.discount_start_date}
+                  onChange={handleInputChange} min={today}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${errors.discount_start_date ? 'border-red-400' : 'border-gray-300'}`} />
+                {errors.discount_start_date && <p className="text-red-500 text-xs mt-1">{errors.discount_start_date}</p>}
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  <Calendar className="w-3.5 h-3.5 inline mr-1 text-orange-500" />
-                  End Date *
+                  <Calendar className="w-3.5 h-3.5 inline mr-1 text-orange-500" />End Date *
                 </label>
-                <input
-                  type="date"
-                  name="discount_end_date"
-                  value={formData.discount_end_date}
-                  onChange={handleInputChange}
-                  min={formData.discount_start_date || today}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white
-                    ${errors.discount_end_date ? 'border-red-400' : 'border-gray-300'}`}
-                />
-                {errors.discount_end_date && (
-                  <p className="text-red-500 text-xs mt-1">{errors.discount_end_date}</p>
-                )}
+                <input type="date" name="discount_end_date" value={formData.discount_end_date}
+                  onChange={handleInputChange} min={formData.discount_start_date || today}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${errors.discount_end_date ? 'border-red-400' : 'border-gray-300'}`} />
+                {errors.discount_end_date && <p className="text-red-500 text-xs mt-1">{errors.discount_end_date}</p>}
               </div>
             </div>
           )}
 
-          {/* Preview of discounted price */}
           {hasDiscount && formData.price && (
             <div className="mt-3 p-2 bg-white border border-orange-200 rounded-lg flex items-center gap-3 text-sm">
               <span className="text-gray-500 line-through">₱{parseFloat(formData.price).toFixed(2)}</span>
@@ -529,17 +534,16 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           )}
         </div>
 
-        {/* ── Weight ─────────────────────────────────────────── */}
+        {/* Weight + Tags */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-<label className="block text-sm font-medium text-gray-700 mb-1">Weight *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Weight *</label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Weight className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <input type="number" name="weight" value={formData.weight} onChange={handleInputChange}
                   step="0.01" min="0" placeholder="0.00"
-                  className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-                    ${errors.weight ? 'border-red-400' : 'border-gray-300'}`} />
+                  className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.weight ? 'border-red-400' : 'border-gray-300'}`} />
               </div>
               <div className="relative">
                 <select name="weight_unit" value={formData.weight_unit} onChange={handleInputChange}
@@ -553,7 +557,6 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
             <p className="text-xs text-gray-400 mt-1">Helps calculate accurate shipping rates</p>
           </div>
 
-          {/* ── Tags ──────────────────────────────────────────── */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Tags (comma separated)</label>
             <div className="relative">
@@ -565,7 +568,7 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           </div>
         </div>
 
-        {/* ── Checkboxes ─────────────────────────────────────── */}
+        {/* Checkboxes */}
         <div className="flex space-x-6">
           <label className="flex items-center">
             <input type="checkbox" name="is_active" checked={formData.is_active}
@@ -582,15 +585,7 @@ const ProductForm = ({ userId, userRole, onSuccess }) => {
           </label>
         </div>
 
-        {/* ── Submit error ───────────────────────────────────── */}
-        {errors.submit && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-center">
-            <AlertCircle className="h-4 w-4 text-red-600 mr-2 flex-shrink-0" />
-            <p className="text-red-700 text-sm">{errors.submit}</p>
-          </div>
-        )}
-
-        {/* ── Submit button ──────────────────────────────────── */}
+        {/* Submit button */}
         <button onClick={handleSubmit} disabled={loading}
           className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
           {loading ? 'Creating Product…' : 'Create Product'}

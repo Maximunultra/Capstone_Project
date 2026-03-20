@@ -29,9 +29,8 @@ const ProductEditPage = () => {
   const [imagePreview,   setImagePreview]    = useState(null);
   const [formErrors,     setFormErrors]      = useState({});
 
-  // Live rule preview state
-  const [categoryRule,   setCategoryRule]    = useState(null); // full rule object for selected category
-  const [rulePreview,    setRulePreview]     = useState(null); // { status, reason }
+  const [categoryRule,   setCategoryRule]    = useState(null);
+  const [rulePreview,    setRulePreview]     = useState(null);
 
   const [form, setForm] = useState({
     product_name:        '',
@@ -52,8 +51,8 @@ const ProductEditPage = () => {
   });
 
   const [allowedMaterials, setAllowedMaterials] = useState([]);
-  const [showCancelModal, setShowCancelModal]   = useState(false);
-  const originalFormRef = React.useRef(null);  // snapshot of form when loaded
+  const [showCancelModal,  setShowCancelModal]  = useState(false);
+  const originalFormRef = React.useRef(null);
 
   // ── Fetch categories ──────────────────────────────────────
   useEffect(() => {
@@ -83,7 +82,7 @@ const ProductEditPage = () => {
     }
   }, [form.category, categories]);
 
-  // ── Live rule preview — recalculate whenever price/category/material changes ─
+  // ── Live rule preview ─────────────────────────────────────
   useEffect(() => {
     if (!form.category) { setRulePreview(null); return; }
 
@@ -98,7 +97,6 @@ const ProductEditPage = () => {
 
     const price = parseFloat(form.price);
 
-    // Price range check
     if (rule.min_price !== null && !isNaN(price) && price < rule.min_price) {
       setRulePreview({
         status: 'rejected',
@@ -114,9 +112,8 @@ const ProductEditPage = () => {
       return;
     }
 
-    // Material check
     if (rule.allowed_materials?.length > 0 && form.material) {
-      const allowed = rule.allowed_materials.map(m => m.toLowerCase());
+      const allowed   = rule.allowed_materials.map(m => m.toLowerCase());
       const isAllowed = allowed.some(m => form.material.toLowerCase().includes(m));
       if (!isAllowed) {
         setRulePreview({
@@ -127,8 +124,7 @@ const ProductEditPage = () => {
       }
     }
 
-    // Pending if required fields are missing
-    if (!form.price || !form.material && rule.allowed_materials?.length > 0) {
+    if (!form.price || (!form.material && rule.allowed_materials?.length > 0)) {
       setRulePreview({ status: 'pending', reason: 'Fill in all required fields to see approval status.' });
       return;
     }
@@ -169,7 +165,7 @@ const ProductEditPage = () => {
         return;
       }
 
-      setForm({
+      const loaded = {
         product_name:        data.product_name        || '',
         description:         data.description         || '',
         price:               data.price               || '',
@@ -187,27 +183,11 @@ const ProductEditPage = () => {
         is_active:           data.is_active  ?? true,
         is_featured:         data.is_featured || false,
         tags: Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''),
-      });
-
-      if (data.product_image) setImagePreview(data.product_image);
-      // Save original snapshot for dirty-check
-      originalFormRef.current = {
-        product_name:        data.product_name        || '',
-        description:         data.description         || '',
-        price:               data.price               || '',
-        category:            data.category            || '',
-        material:            data.material || data.brand || '',
-        stock_quantity:      data.stock_quantity       || '',
-        weight:              data.weight               || '',
-        weight_unit:         data.weight_unit          || 'g',
-        discount_percentage: data.discount_percentage  || '',
-        discount_start_date: data.discount_start_date ? data.discount_start_date.split('T')[0] : '',
-        discount_end_date:   data.discount_end_date   ? data.discount_end_date.split('T')[0]   : '',
-        product_image:       data.product_image        || '',
-        is_active:           data.is_active  ?? true,
-        is_featured:         data.is_featured || false,
-        tags: Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''),
       };
+
+      setForm(loaded);
+      if (data.product_image) setImagePreview(data.product_image);
+      originalFormRef.current = { ...loaded };
     } catch (err) {
       setError('Failed to load product.');
       console.error(err);
@@ -223,7 +203,6 @@ const ProductEditPage = () => {
       setForm(f => ({ ...f, category: value, material: '' }));
       return;
     }
-
     if (field === 'discount_percentage' && (!value || parseFloat(value) === 0)) {
       setForm(f => ({ ...f, discount_percentage: value, discount_start_date: '', discount_end_date: '' }));
       return;
@@ -271,29 +250,31 @@ const ProductEditPage = () => {
   // ── Validation ────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.product_name.trim())                    e.product_name   = 'Product name is required.';
-    if (!form.description.trim())                     e.description    = 'Description is required.';
-    if (!form.category.trim())                        e.category       = 'Category is required.';
-    if (!form.price || parseFloat(form.price) <= 0)  e.price          = 'Valid price is required.';
+
+    if (!form.product_name.trim())                     e.product_name   = 'Product name is required.';
+    if (!form.description.trim())                      e.description    = 'Description is required.';
+    if (!form.category.trim())                         e.category       = 'Category is required.';
     if (!form.stock_quantity || parseInt(form.stock_quantity) < 0)
-                                                      e.stock_quantity = 'Valid stock quantity is required.';
-    if (!form.weight || parseFloat(form.weight) <= 0) e.weight        = 'Weight is required.';
+                                                       e.stock_quantity = 'Valid stock quantity is required.';
+    if (!form.weight || parseFloat(form.weight) <= 0)  e.weight         = 'Weight is required.';
 
     if (allowedMaterials.length > 0 && !form.material)
       e.material = 'Material is required for this category.';
 
-    // Category rule validation (price range)
-    if (categoryRule && form.price) {
+    // ✅ Price validation — required + category range check
+    if (!form.price || parseFloat(form.price) <= 0) {
+      e.price = 'Valid price is required.';
+    } else if (categoryRule) {
       const price = parseFloat(form.price);
       if (categoryRule.min_price !== null && price < categoryRule.min_price)
-        e.price = `Price must be at least ₱${categoryRule.min_price} for "${form.category}".`;
-      if (categoryRule.max_price !== null && price > categoryRule.max_price)
-        e.price = `Price cannot exceed ₱${categoryRule.max_price} for "${form.category}".`;
+        e.price = `Price must be at least ₱${categoryRule.min_price.toLocaleString()} for "${form.category}".`;
+      else if (categoryRule.max_price !== null && price > categoryRule.max_price)
+        e.price = `Price must not exceed ₱${categoryRule.max_price.toLocaleString()} for "${form.category}".`;
     }
 
-    // Material rule validation
+    // ✅ Material rule validation
     if (categoryRule?.allowed_materials?.length > 0 && form.material) {
-      const allowed = categoryRule.allowed_materials.map(m => m.toLowerCase());
+      const allowed   = categoryRule.allowed_materials.map(m => m.toLowerCase());
       const isAllowed = allowed.some(m => form.material.toLowerCase().includes(m));
       if (!isAllowed)
         e.material = `"${form.material}" is not allowed for "${form.category}". Choose: ${categoryRule.allowed_materials.join(', ')}.`;
@@ -317,10 +298,39 @@ const ProductEditPage = () => {
   // ── Submit ────────────────────────────────────────────────
   const handleSubmit = async () => {
     setError(''); setSuccess('');
+
     const e = validate();
-    if (Object.keys(e).length) { setFormErrors(e); return; }
+    if (Object.keys(e).length) {
+      setFormErrors(e);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setFormErrors({});
     setSubmitting(true);
+
+    // ✅ Async duplicate name check — same seller, same category, different product
+    // Do this before uploading image so we don't waste the upload if it fails
+    try {
+      const checkRes = await fetch(
+        `${API_BASE_URL}/products?user_id=${userId}&category=${encodeURIComponent(form.category)}&limit=100`
+      );
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        const duplicate = (checkData.products || []).find(p =>
+          p.id !== parseInt(id) &&
+          p.product_name.trim().toLowerCase() === form.product_name.trim().toLowerCase()
+        );
+        if (duplicate) {
+          setFormErrors({ product_name: `You already have a product named "${duplicate.product_name}" in the "${form.category}" category. Please use a different name.` });
+          setSubmitting(false);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+      }
+    } catch (checkErr) {
+      // If the check fails, let the backend handle it via 409
+      console.warn('Duplicate check failed, proceeding:', checkErr);
+    }
 
     try {
       let imageUrl = form.product_image;
@@ -354,19 +364,23 @@ const ProductEditPage = () => {
         body:    JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || err.message || 'Failed to update product');
+      const responseData = await res.json();
+
+      // ✅ 409 = duplicate product name in same category
+      if (res.status === 409) {
+        setError(responseData.error || 'A product with this name already exists in this category.');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
       }
 
-      const updated = await res.json();
+      if (!res.ok) throw new Error(responseData.error || responseData.message || 'Failed to update product');
 
-      // Show approval result if status changed
-      const newStatus = updated.approval_status;
+      // ✅ Show approval result based on what backend returned
+      const newStatus = responseData.approval_status;
       if (newStatus === 'approved') {
-        setSuccess('✅ Product updated and auto-approved — it\'s now live!');
+        setSuccess("✅ Product updated and auto-approved — it's now live!");
       } else if (newStatus === 'rejected') {
-        setSuccess(`Product updated. ❌ Auto-rejected: ${updated.rejection_reason}`);
+        setSuccess(`Product updated. ❌ Auto-rejected: ${responseData.rejection_reason}`);
       } else {
         setSuccess('Product updated successfully!');
       }
@@ -374,6 +388,7 @@ const ProductEditPage = () => {
       setTimeout(() => doGoBack(), 2000);
     } catch (err) {
       setError(err.message);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSubmitting(false);
     }
@@ -425,7 +440,7 @@ const ProductEditPage = () => {
           </div>
         )}
 
-        {/* ── Live Approval Preview Banner ─────────────────── */}
+        {/* Live Approval Preview Banner */}
         {rulePreview && userRole !== 'admin' && (
           <div className={`flex items-start gap-3 mb-5 p-4 rounded-xl border text-sm font-medium
             ${rulePreview.status === 'approved'
@@ -451,7 +466,7 @@ const ProductEditPage = () => {
           </div>
         )}
 
-        {/* ── Section 1: Product Image ─────────────────────── */}
+        {/* Section 1: Product Image */}
         <Section title="Product Image" icon={<ImageIcon className="w-4 h-4 text-orange-500" />}>
           <div className="space-y-4">
             {imagePreview ? (
@@ -481,7 +496,7 @@ const ProductEditPage = () => {
           </div>
         </Section>
 
-        {/* ── Section 2: Basic Info ────────────────────────── */}
+        {/* Section 2: Basic Info */}
         <Section title="Basic Information" icon={<Package className="w-4 h-4 text-orange-500" />}>
           <div className="space-y-4">
 
@@ -542,7 +557,7 @@ const ProductEditPage = () => {
           </div>
         </Section>
 
-        {/* ── Section 3: Pricing & Stock ───────────────────── */}
+        {/* Section 3: Pricing & Stock */}
         <Section title="Pricing & Stock" icon={<Percent className="w-4 h-4 text-orange-500" />}>
           <div className="space-y-4">
 
@@ -552,12 +567,13 @@ const ProductEditPage = () => {
                   onChange={e => handleChange('price', e.target.value)}
                   placeholder="0.00"
                   className={inputCls(formErrors.price)} />
-                {/* Inline price range hint */}
+                {/* ✅ Price range hint — turns red when there's a price error */}
                 {categoryRule && (categoryRule.min_price !== null || categoryRule.max_price !== null) && (
-                  <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
-                    <Info className="w-3 h-3" />
-                    Allowed: {categoryRule.min_price !== null ? `₱${categoryRule.min_price}` : '₱0'} –{' '}
-                    {categoryRule.max_price !== null ? `₱${categoryRule.max_price}` : 'no limit'}
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${formErrors.price ? 'text-red-500 font-medium' : 'text-orange-600'}`}>
+                    <Info className="w-3 h-3 flex-shrink-0" />
+                    Allowed: {categoryRule.min_price !== null ? `₱${categoryRule.min_price.toLocaleString()}` : '₱0'}
+                    {' – '}
+                    {categoryRule.max_price !== null ? `₱${categoryRule.max_price.toLocaleString()}` : 'no limit'}
                   </p>
                 )}
               </Field>
@@ -630,7 +646,7 @@ const ProductEditPage = () => {
           </div>
         </Section>
 
-        {/* ── Section 4: Visibility ────────────────────────── */}
+        {/* Section 4: Visibility */}
         <Section title="Visibility" icon={<CheckCircle className="w-4 h-4 text-orange-500" />}>
           <div className="space-y-3">
             <Toggle
@@ -668,7 +684,7 @@ const ProductEditPage = () => {
 
       </div>
 
-      {/* ── Unsaved Changes Modal ──────────────────────── */}
+      {/* Unsaved Changes Modal */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
@@ -682,13 +698,11 @@ const ProductEditPage = () => {
               You have unsaved changes. If you leave now, all your changes will be lost.
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowCancelModal(false)}
+              <button onClick={() => setShowCancelModal(false)}
                 className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition">
                 Keep Editing
               </button>
-              <button
-                onClick={() => { setShowCancelModal(false); doGoBack(); }}
+              <button onClick={() => { setShowCancelModal(false); doGoBack(); }}
                 className="flex-1 px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-medium transition">
                 Discard & Leave
               </button>

@@ -22,9 +22,13 @@ const BuyerDashboard = ({ userId, userRole }) => {
 
   const categories = [
     { id: 'all', label: 'All Collections' },
-    { id: 'Accessories', label: 'Accessories' },
+    { id: 'Bag', label: 'Bag' },
+    { id: 'Foods', label: 'Foods' },
+    { id: 'Furniture', label: 'Furniture' },
     { id: 'Home Decor', label: 'Home Decor' },
-    { id: 'Kitchen', label: 'Kitchen' },
+    { id: 'Jewelry', label: 'Jewelry' },
+    { id: 'Pottery & Crafts', label: 'Pottery & Crafts' },
+    { id: 'Textiles', label: 'Textiles' },
     { id: 'Clothing', label: 'Clothing' },
   ];
 
@@ -245,7 +249,7 @@ const BuyerDashboard = ({ userId, userRole }) => {
                 <div
                   key={product.id}
                   onClick={() => handleProductClick(product.id)}
-                  className="bg-white rounded-xl sm:rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 cursor-pointer group"
+                  className="bg-white rounded-xl sm:rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 cursor-pointer group flex flex-col"
                   style={{
                     animation: `fadeInUp 0.6s ease-out ${index * 0.1}s both`
                   }}
@@ -291,7 +295,7 @@ const BuyerDashboard = ({ userId, userRole }) => {
                   </div>
 
                   {/* Product Info - Responsive padding */}
-                  <div className="p-4 sm:p-5 md:p-6">
+                  <div className="p-4 sm:p-5 md:p-6 flex flex-col flex-1">
                     {/* Category Tag */}
                     {product.category && (
                       <div className="inline-block bg-[#ebe5dc] text-[#a48a6d] px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-xs font-semibold mb-2 sm:mb-3 uppercase tracking-wide">
@@ -347,7 +351,7 @@ const BuyerDashboard = ({ userId, userRole }) => {
 
                     {/* Action Buttons - Responsive sizing */}
                     {currentUserRole === 'buyer' && product.stock_quantity > 0 && (
-                      <div className="flex gap-2 sm:gap-3">
+                      <div className="flex gap-2 sm:gap-3 mt-auto pt-4">
                         <button
                           onClick={(e) => openModal(product, 'cart', e)}
                           className="flex-shrink-0 bg-white border-2 border-[#d4cdc3] hover:border-[#a48a6d] hover:bg-[#ebe5dc] text-[#a48a6d] p-2 sm:p-3 rounded-lg sm:rounded-xl transition-all duration-300"

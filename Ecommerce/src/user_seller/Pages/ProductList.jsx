@@ -5,9 +5,6 @@ import { BookOpen } from 'lucide-react';
 
 const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 
-// ─────────────────────────────────────────────────────────────
-// MAIN PAGE
-// ─────────────────────────────────────────────────────────────
 const ProductListPage = ({ userId, userRole }) => {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
@@ -161,10 +158,12 @@ const ProductListPage = ({ userId, userRole }) => {
       setPagination(prev => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }));
   };
 
-  const calculateDiscountedPrice = (price, discount) => {
-    if (!discount || discount === 0) return price;
-    return (price - (price * discount / 100)).toFixed(2);
-  };
+  // ✅ Use backend-computed fields — respects discount dates
+  const isDiscountActive = (product) => product.discount_active === true;
+  const getEffectivePrice = (product) =>
+    parseFloat(product.effective_price ?? product.price).toLocaleString('en-PH', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
 
   const canModifyProduct = (product) => {
     if (currentUserRole === 'admin') return false;
@@ -174,7 +173,6 @@ const ProductListPage = ({ userId, userRole }) => {
 
   const hasActiveFilters = filters.category || filters.priceRange !== 'all' || filters.approvalStatus !== 'all' || debouncedSearch;
 
-  // ── Add product view ──────────────────────────────────────
   if (showAddForm) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
@@ -196,7 +194,7 @@ const ProductListPage = ({ userId, userRole }) => {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-4 sm:py-6 lg:py-8 px-3 sm:px-4 lg:px-6">
       <div className="max-w-[1920px] mx-auto w-full">
 
-        {/* ── Header ───────────────────────────────────────── */}
+        {/* Header */}
         <div className="mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex-1">
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
@@ -211,8 +209,6 @@ const ProductListPage = ({ userId, userRole }) => {
 
           {currentUserRole === 'seller' && (
             <div className="flex items-center gap-2 w-full sm:w-auto">
-
-              {/* 📖 Rules book icon with tooltip + navigate */}
               <div className="relative">
                 <button
                   onMouseEnter={() => setShowRulesTooltip(true)}
@@ -223,11 +219,8 @@ const ProductListPage = ({ userId, userRole }) => {
                 >
                   <BookOpen className="w-5 h-5" />
                 </button>
-
-                {/* Floating tooltip */}
                 {showRulesTooltip && (
                   <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-[#3d2e1e] text-white text-xs rounded-xl shadow-2xl p-3.5 pointer-events-none">
-                    {/* Arrow */}
                     <div className="absolute -top-1.5 right-3 w-3 h-3 bg-[#3d2e1e] rotate-45 rounded-sm" />
                     <p className="font-bold text-amber-300 mb-1.5 flex items-center gap-1.5">
                       📋 Must Read Before Adding a Product
@@ -241,8 +234,6 @@ const ProductListPage = ({ userId, userRole }) => {
                   </div>
                 )}
               </div>
-
-              {/* Add New Product button */}
               <button
                 onClick={() => setShowAddForm(true)}
                 className="flex-1 sm:flex-none bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-sm sm:text-base"
@@ -261,8 +252,7 @@ const ProductListPage = ({ userId, userRole }) => {
           )}
         </div>
 
-
-        {/* ── Search + Sort ─────────────────────────────────── */}
+        {/* Search + Sort */}
         <div className="mb-4">
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <div className="relative flex-1">
@@ -301,7 +291,7 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         </div>
 
-        {/* ── Filters ──────────────────────────────────────── */}
+        {/* Filters */}
         <div className="mb-6 sm:mb-8">
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-4 sm:p-6">
             <div className={`grid grid-cols-1 sm:grid-cols-2 ${currentUserRole === 'admin' ? 'lg:grid-cols-3' : 'lg:grid-cols-2'} gap-4 sm:gap-6`}>
@@ -421,7 +411,6 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         </div>
 
-        {/* ── Loading / Error ───────────────────────────────── */}
         {loading && (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div>
@@ -435,7 +424,6 @@ const ProductListPage = ({ userId, userRole }) => {
           </div>
         )}
 
-        {/* ── Products Grid ─────────────────────────────────── */}
         {!loading && !error && (
           <>
             {products.length > 0 && (
@@ -492,7 +480,8 @@ const ProductListPage = ({ userId, userRole }) => {
 
                       <div className="absolute top-2 left-2 flex flex-col gap-1">
                         {product.is_featured && <span className="bg-yellow-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Featured</span>}
-                        {product.discount_percentage > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded">-{product.discount_percentage}%</span>}
+                        {/* ✅ Only show discount badge when discount is actually active */}
+                        {isDiscountActive(product) && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded">-{product.discount_percentage}%</span>}
                         {!product.is_active && <span className="bg-gray-500 text-white text-[10px] px-1.5 py-0.5 rounded">Inactive</span>}
                         {product.approval_status === 'pending'  && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded">⏳ Pending</span>}
                         {product.approval_status === 'rejected' && <span className="bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded">❌ Rejected</span>}
@@ -510,14 +499,19 @@ const ProductListPage = ({ userId, userRole }) => {
                       <h3 className="font-semibold text-gray-900 mb-1 text-sm truncate">{product.product_name}</h3>
                       {product.category && <p className="text-[10px] text-gray-500 mb-1">{product.category}</p>}
 
+                      {/* ✅ Price display using backend discount_active + effective_price */}
                       <div className="mb-2">
-                        {product.discount_percentage > 0 ? (
+                        {isDiscountActive(product) ? (
                           <div>
-                            <span className="text-base font-bold text-green-600">₱{calculateDiscountedPrice(product.price, product.discount_percentage)}</span>
-                            <span className="text-xs text-gray-500 line-through ml-1">₱{product.price}</span>
+                            <span className="text-base font-bold text-green-600">₱{getEffectivePrice(product)}</span>
+                            <span className="text-xs text-gray-500 line-through ml-1">
+                              ₱{parseFloat(product.price).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
                           </div>
                         ) : (
-                          <span className="text-base font-bold text-gray-900">₱{product.price}</span>
+                          <span className="text-base font-bold text-gray-900">
+                            ₱{parseFloat(product.price).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
                         )}
                       </div>
 
