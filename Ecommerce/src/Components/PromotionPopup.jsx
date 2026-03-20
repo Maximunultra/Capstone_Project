@@ -222,16 +222,14 @@ const PromotionPopup = () => {
                   <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 mb-2 sm:mb-3">
                     {currentPromotion.discount_percentage > 0 ? (
                       <>
-                        <span className="text-3xl sm:text-4xl lg:text-5xl font-bold text-green-600">
-                          ${calculateDiscountedPrice(product.price, currentPromotion.discount_percentage)}
-                        </span>
+                        
                         <span className="text-xl sm:text-2xl lg:text-3xl text-gray-500 line-through">
-                          ${product.price}
+                          ₱{product.price}
                         </span>
                       </>
                     ) : (
                       <span className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900">
-                        ${product.price}
+                        ₱{product.price}
                       </span>
                     )}
                   </div>
@@ -242,7 +240,7 @@ const PromotionPopup = () => {
                       <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
-                      You save ${(product.price - calculateDiscountedPrice(product.price, currentPromotion.discount_percentage)).toFixed(2)}!
+                      You save {(product.price - calculateDiscountedPrice(product.price, currentPromotion.discount_percentage)).toFixed(2)}!
                     </p>
                   )}
                 </div>
@@ -255,9 +253,9 @@ const PromotionPopup = () => {
               */}
               <div className="mb-6 sm:mb-8 p-3 sm:p-4 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl shadow-sm">
                 <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  {/* <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                  </svg>
+                  </svg> */}
                   <span className="font-bold text-yellow-900 text-sm sm:text-base">⚡ Limited Time Offer!</span>
                 </div>
                 <p className="text-xs sm:text-sm text-yellow-800 ml-6 sm:ml-7">
