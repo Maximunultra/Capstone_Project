@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const API_BASE_URL = "http://localhost:5000/api"; // Adjust as needed
+const API_BASE_URL = "https://capstone-project-1msq.onrender.com/api"; // Adjust as needed
 
 // ─── Safe JSON parser ─────────────────────────────────────────────────────────
 // Prevents "Unexpected token '<'" crash when the server returns an HTML error page
