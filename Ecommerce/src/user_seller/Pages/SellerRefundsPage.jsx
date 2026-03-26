@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle, Clock, XCircle, Upload, X, AlertCircle, RefreshCw, Eye } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const currency = (v) =>
   new Intl.NumberFormat('en-PH', { style:'currency', currency:'PHP', maximumFractionDigits:2 }).format(parseFloat(v)||0);

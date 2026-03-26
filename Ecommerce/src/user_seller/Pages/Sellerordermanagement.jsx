@@ -1,10 +1,47 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, ShoppingBag, MessageCircle, Send } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, Edit2, X, Save, ShoppingBag, MessageCircle, Send, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 
-// API Base URL - Update this to your actual API endpoint
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
+// ─── Toast Notification System ────────────────────────────────────────────────
+const Toast = ({ toasts, removeToast }) => (
+  <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+    {toasts.map(toast => (
+      <div
+        key={toast.id}
+        className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-medium max-w-sm w-full animate-slide-in transition-all duration-300 ${
+          toast.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+          toast.type === 'error'   ? 'bg-red-50 border-red-200 text-red-800' :
+          'bg-blue-50 border-blue-200 text-blue-800'
+        }`}
+      >
+        <div className="flex-shrink-0 mt-0.5">
+          {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+          {toast.type === 'error'   && <AlertCircle  className="w-4 h-4 text-red-600"   />}
+          {toast.type === 'info'    && <Info         className="w-4 h-4 text-blue-600"  />}
+        </div>
+        <span className="flex-1 leading-snug">{toast.message}</span>
+        <button onClick={() => removeToast(toast.id)} className="flex-shrink-0 opacity-50 hover:opacity-100 transition">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    ))}
+  </div>
+);
+
+const useToast = () => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 3500) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+  return { toasts, removeToast, toast: { success: (m) => addToast(m, 'success'), error: (m) => addToast(m, 'error'), info: (m) => addToast(m, 'info') } };
+};
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 const SellerOrderManagement = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,41 +53,34 @@ const SellerOrderManagement = () => {
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // ✅ Message/Note Modal States
+  // Message Modal
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messageType, setMessageType] = useState('update');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState('');
 
-  // Get current user info
+  const { toasts, removeToast, toast } = useToast();
+
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentUserId = currentUser.id;
   const currentUserRole = currentUser.role;
 
-  useEffect(() => {
-    fetchOrders();
-  }, [statusFilter]);
+  useEffect(() => { fetchOrders(); }, [statusFilter]);
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
       let url = `${API_BASE_URL}/orders`;
       const params = new URLSearchParams();
-      
-      if (currentUserRole === 'seller' && currentUserId) {
-        params.append('seller_id', currentUserId);
-      }
-      if (statusFilter !== 'all') {
-        params.append('status', statusFilter);
-      }
+      if (currentUserRole === 'seller' && currentUserId) params.append('seller_id', currentUserId);
+      if (statusFilter !== 'all') params.append('status', statusFilter);
       if (params.toString()) url += `?${params.toString()}`;
-
       const response = await fetch(url);
       const data = await response.json();
       if (data.success) setOrders(data.orders);
     } catch (error) {
-      console.error('❌ Error fetching orders:', error);
+      console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
@@ -59,7 +89,7 @@ const SellerOrderManagement = () => {
   const handleUpdateStatus = async () => {
     if (!selectedOrder || !selectedStatus) return;
     if (selectedOrder.order_status === 'delivered') {
-      alert('Cannot change status of delivered orders');
+      toast.error('Cannot change status of delivered orders.');
       return;
     }
     try {
@@ -67,20 +97,18 @@ const SellerOrderManagement = () => {
       const response = await fetch(`${API_BASE_URL}/orders/${selectedOrder.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({
-  order_status: selectedStatus,
-  seller_id:    currentUserId,
-})      });
+        body: JSON.stringify({ order_status: selectedStatus, seller_id: currentUserId })
+      });
       const data = await response.json();
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, order_status: selectedStatus } : o));
         setSelectedOrder({ ...selectedOrder, order_status: selectedStatus });
-        alert('Order status updated successfully!');
+        toast.success('Order status updated successfully!');
       } else {
-        alert(data.error || 'Failed to update status');
+        toast.error(data.error || 'Failed to update status.');
       }
     } catch (error) {
-      alert('Error updating status');
+      toast.error('Error updating status. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -88,8 +116,14 @@ body: JSON.stringify({
 
   const handleUpdatePaymentStatus = async () => {
     if (!selectedOrder || !selectedPaymentStatus) return;
+
+    // ✅ FIX: Block payment changes on cancelled orders
+    if (selectedOrder.order_status === 'cancelled') {
+      toast.error('Payment status cannot be changed for cancelled orders.');
+      return;
+    }
     if (selectedOrder.payment_method !== 'cod') {
-      alert('Payment status can only be modified for COD orders');
+      toast.error('Payment status can only be modified for COD orders.');
       return;
     }
     try {
@@ -103,12 +137,12 @@ body: JSON.stringify({
       if (data.success) {
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, payment_status: selectedPaymentStatus } : o));
         setSelectedOrder({ ...selectedOrder, payment_status: selectedPaymentStatus });
-        alert('Payment status updated successfully!');
+        toast.success('Payment status updated successfully!');
       } else {
-        alert(data.error || 'Failed to update payment status');
+        toast.error(data.error || 'Failed to update payment status.');
       }
     } catch (error) {
-      alert('Error updating payment status');
+      toast.error('Error updating payment status. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -128,10 +162,12 @@ body: JSON.stringify({
         setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, tracking_number: trackingNumber } : o));
         setSelectedOrder({ ...selectedOrder, tracking_number: trackingNumber });
         setEditingTracking(false);
-        alert('Tracking number updated successfully!');
+        toast.success('Tracking number updated successfully!');
+      } else {
+        toast.error(data.error || 'Failed to update tracking number.');
       }
     } catch (error) {
-      alert('Error updating tracking number');
+      toast.error('Error updating tracking number. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -146,22 +182,16 @@ body: JSON.stringify({
 
   const handleSendMessage = async () => {
     setMessageError('');
-    if (!messageText.trim()) {
-      setMessageError('Please enter a message');
-      return;
-    }
+    if (!messageText.trim()) { setMessageError('Please enter a message.'); return; }
     const buyerId = selectedOrder.user_id || selectedOrder.buyer_id || selectedOrder.customer_id;
-    if (!buyerId) {
-      setMessageError('Buyer information not available. Please contact support.');
-      return;
-    }
+    if (!buyerId) { setMessageError('Buyer information not available. Please contact support.'); return; }
     setSendingMessage(true);
     try {
       const messageData = {
-        sender_id: currentUserId,
+        sender_id:  currentUserId,
         receiver_id: buyerId,
-        message: messageText.trim(),
-        order_id: parseInt(selectedOrder.id),
+        message:    messageText.trim(),
+        order_id:   parseInt(selectedOrder.id),
         product_id: selectedOrder.order_items?.[0]?.product_id || null
       };
       const response = await fetch(`${API_BASE_URL}/messages`, {
@@ -171,7 +201,7 @@ body: JSON.stringify({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to send message');
-      alert('✅ Message sent to buyer successfully!');
+      toast.success('Message sent to buyer successfully!');
       setShowMessageModal(false);
       setMessageText('');
     } catch (err) {
@@ -183,10 +213,10 @@ body: JSON.stringify({
 
   const getMessageTemplate = (type) => {
     const templates = {
-      update: `Hello! This is an update regarding your order #${selectedOrder?.order_number || ''}.\n\n`,
-      delay: `Dear Customer,\n\nWe regret to inform you that your order #${selectedOrder?.order_number || ''} will experience a slight delay due to unforeseen circumstances (e.g., bad weather, supply issues).\n\nWe apologize for any inconvenience and will keep you updated.\n\nThank you for your patience!`,
+      update:   `Hello! This is an update regarding your order #${selectedOrder?.order_number || ''}.\n\n`,
+      delay:    `Dear Customer,\n\nWe regret to inform you that your order #${selectedOrder?.order_number || ''} will experience a slight delay due to unforeseen circumstances.\n\nWe apologize for any inconvenience and will keep you updated.\n\nThank you for your patience!`,
       delivery: `Good news! Your order #${selectedOrder?.order_number || ''} is scheduled for delivery today.\n\nPlease ensure someone is available to receive the package.\n\nThank you for your business!`,
-      weather: `Dear Customer,\n\nDue to severe weather conditions in your area, the delivery of order #${selectedOrder?.order_number || ''} has been delayed for safety reasons.\n\nWe expect to resume delivery as soon as conditions improve.\n\nThank you for your understanding!`
+      weather:  `Dear Customer,\n\nDue to severe weather conditions in your area, the delivery of order #${selectedOrder?.order_number || ''} has been delayed for safety reasons.\n\nWe expect to resume delivery as soon as conditions improve.\n\nThank you for your understanding!`
     };
     return templates[type] || '';
   };
@@ -199,46 +229,41 @@ body: JSON.stringify({
     setEditingTracking(false);
   };
 
-  const closeOrderDetails = () => {
-    setSelectedOrder(null);
-    setEditingTracking(false);
-  };
+  const closeOrderDetails = () => { setSelectedOrder(null); setEditingTracking(false); };
 
   const getStatusConfig = (status) => {
     const configs = {
-      pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock, label: 'Pending' },
-      processing: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Package, label: 'Processing' },
-      shipped: { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Truck, label: 'Shipped' },
-      delivered: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle, label: 'Delivered' },
-      cancelled: { color: 'bg-gray-100 text-gray-700 border-gray-200', icon: X, label: 'Cancelled' }
+      pending:    { color: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock,        label: 'Pending'    },
+      processing: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Package,      label: 'Processing' },
+      shipped:    { color: 'bg-blue-100 text-blue-700 border-blue-200',       icon: Truck,        label: 'Shipped'    },
+      delivered:  { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle, label: 'Delivered' },
+      cancelled:  { color: 'bg-red-100 text-red-700 border-red-200',          icon: X,            label: 'Cancelled'  }
     };
     return configs[status] || configs.pending;
   };
 
   const getPaymentStatusConfig = (status) => {
     const configs = {
-      pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', label: 'Pending' },
-      paid: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Paid' },
-      failed: { color: 'bg-red-100 text-red-700 border-red-200', label: 'Failed' }
+      pending: { color: 'bg-amber-100 text-amber-700 border-amber-200',      label: 'Pending' },
+      paid:    { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Paid'    },
+      failed:  { color: 'bg-red-100 text-red-700 border-red-200',            label: 'Failed'  }
     };
     return configs[status] || configs.pending;
   };
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric'
-    });
-  };
+  const formatDate     = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatCurrency = (v) => `₱${parseFloat(v).toFixed(2)}`;
+  const getTotalItems  = (items) => (items || []).reduce((s, i) => s + (i.quantity || 0), 0);
 
-  const formatCurrency = (amount) => `₱${parseFloat(amount).toFixed(2)}`;
-
-  const getTotalItems = (orderItems) => {
-    if (!orderItems || orderItems.length === 0) return 0;
-    return orderItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-  };
+  // ✅ Whether payment section is locked (cancelled orders or non-COD)
+  const isCancelled = selectedOrder?.order_status === 'cancelled';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 py-8 px-4">
+
+      {/* Toast Notifications */}
+      <Toast toasts={toasts} removeToast={removeToast} />
+
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
         <div className="flex items-center justify-between mb-2">
@@ -247,9 +272,7 @@ body: JSON.stringify({
               {currentUserRole === 'seller' ? 'My Orders' : 'Order Management'}
             </h1>
             <p className="text-gray-600">
-              {currentUserRole === 'seller'
-                ? 'Manage orders containing your products'
-                : 'Manage all customer orders'}
+              {currentUserRole === 'seller' ? 'Manage orders containing your products' : 'Manage all customer orders'}
             </p>
           </div>
           {currentUserRole === 'admin' && (
@@ -292,9 +315,7 @@ body: JSON.stringify({
               <div className="text-6xl mb-4">📦</div>
               <p className="text-gray-600 text-lg font-medium mb-2">No orders found</p>
               <p className="text-gray-500 text-sm">
-                {currentUserRole === 'seller'
-                  ? 'Orders containing your products will appear here'
-                  : 'No orders match your filters'}
+                {currentUserRole === 'seller' ? 'Orders containing your products will appear here' : 'No orders match your filters'}
               </p>
             </div>
           ) : (
@@ -315,16 +336,14 @@ body: JSON.stringify({
                 </thead>
                 <tbody>
                   {orders.map((order, index) => {
-                    const statusConfig = getStatusConfig(order.order_status);
+                    const statusConfig  = getStatusConfig(order.order_status);
                     const paymentConfig = getPaymentStatusConfig(order.payment_status);
-                    const StatusIcon = statusConfig.icon;
-                    const totalItems = getTotalItems(order.order_items);
+                    const StatusIcon    = statusConfig.icon;
+                    const totalItems    = getTotalItems(order.order_items);
                     return (
                       <tr
                         key={order.id}
-                        className={`border-b border-gray-100 hover:bg-amber-50/50 transition-colors duration-200 cursor-pointer ${
-                          index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                        }`}
+                        className={`border-b border-gray-100 hover:bg-amber-50/50 transition-colors duration-200 cursor-pointer ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
                         onClick={() => openOrderDetails(order)}
                       >
                         <td className="px-6 py-4 font-semibold text-gray-900">{order.order_number}</td>
@@ -376,31 +395,46 @@ body: JSON.stringify({
 
       {/* Order Details Modal */}
       {selectedOrder && (
-        <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={closeOrderDetails}
-        >
-          <div
-            className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={closeOrderDetails}>
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+
             {/* Modal Header */}
             <div className="px-8 py-6 border-b-2 border-gray-100 flex justify-between items-center bg-gradient-to-r from-amber-50 to-orange-50 sticky top-0 z-10">
               <div>
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent mb-1">
                   Order Details
                 </h2>
-                <p className="text-gray-600 font-medium">{selectedOrder.order_number}</p>
+                <div className="flex items-center gap-3">
+                  <p className="text-gray-600 font-medium">{selectedOrder.order_number}</p>
+                  {/* ✅ Show cancelled banner in header */}
+                  {isCancelled && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold">
+                      <X size={12} /> Cancelled Order
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={closeOrderDetails} className="p-2 hover:bg-gray-100 rounded-xl transition-colors duration-200">
                 <X size={24} className="text-gray-600" />
               </button>
             </div>
 
+            {/* ✅ Cancelled order warning banner */}
+            {isCancelled && (
+              <div className="mx-8 mt-6 flex items-start gap-3 p-4 bg-red-50 border-2 border-red-200 rounded-xl">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-red-800">This order has been cancelled</p>
+                  <p className="text-xs text-red-600 mt-0.5">Order status and payment status can no longer be modified. All actions are view-only.</p>
+                </div>
+              </div>
+            )}
+
             {/* Modal Body */}
             <div className="p-8 space-y-6">
-              {/* Message Buyer Button (Seller Only) */}
-              {currentUserRole === 'seller' && (
+
+              {/* Message Buyer Button (Seller Only, not cancelled) */}
+              {currentUserRole === 'seller' && !isCancelled && (
                 <div>
                   <button
                     onClick={handleOpenMessageModal}
@@ -415,7 +449,7 @@ body: JSON.stringify({
                 </div>
               )}
 
-              {/* Order Items Section */}
+              {/* Order Items */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <ShoppingBag size={16} />
@@ -440,14 +474,12 @@ body: JSON.stringify({
                             <div className="flex flex-wrap gap-2 text-sm text-gray-600 mb-2">
                               {item.product_category && (
                                 <span className="inline-flex items-center px-2 py-1 bg-white rounded-md border border-amber-200">
-                                  <span className="font-medium">Category:</span>
-                                  <span className="ml-1">{item.product_category}</span>
+                                  <span className="font-medium">Category:</span><span className="ml-1">{item.product_category}</span>
                                 </span>
                               )}
                               {item.product_brand && (
                                 <span className="inline-flex items-center px-2 py-1 bg-white rounded-md border border-amber-200">
-                                  <span className="font-medium">Brand:</span>
-                                  <span className="ml-1">{item.product_brand}</span>
+                                  <span className="font-medium">Brand:</span><span className="ml-1">{item.product_brand}</span>
                                 </span>
                               )}
                             </div>
@@ -483,7 +515,22 @@ body: JSON.stringify({
               {/* Order Status */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Order Status</h3>
-                {currentUserRole === 'admin' ? (
+
+                {/* ✅ Cancelled — view only, locked */}
+                {isCancelled ? (
+                  <div className="bg-red-50 p-5 rounded-xl flex items-center justify-between border-2 border-red-200">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Current Status</p>
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 bg-red-100 text-red-700 border-red-200">
+                        <X size={14} /> Cancelled
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-red-600">
+                      <AlertCircle size={16} />
+                      <p className="text-xs font-semibold">Status is locked</p>
+                    </div>
+                  </div>
+                ) : currentUserRole === 'admin' ? (
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Current Status</p>
@@ -501,8 +548,7 @@ body: JSON.stringify({
                   <div className="bg-gradient-to-r from-emerald-50 to-green-50 p-5 rounded-xl flex items-center justify-between">
                     <span className="font-medium text-gray-900">Delivered (Cannot be changed)</span>
                     <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 bg-emerald-100 text-emerald-700 border-emerald-200">
-                      <CheckCircle size={14} />
-                      Delivered
+                      <CheckCircle size={14} /> Delivered
                     </span>
                   </div>
                 ) : (
@@ -531,11 +577,31 @@ body: JSON.stringify({
                 )}
               </div>
 
-              {/* Payment Status - Only for COD */}
+              {/* Payment Status — COD only */}
               {selectedOrder.payment_method === 'cod' && (
                 <div>
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Payment Status (COD)</h3>
-                  {currentUserRole === 'admin' ? (
+
+                  {/* ✅ FIX: Cancelled order — payment locked with clear message */}
+                  {isCancelled ? (
+                    <div className="bg-red-50 p-5 rounded-xl border-2 border-red-200">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-red-800 mb-1">Payment Locked — Order Cancelled</p>
+                          <p className="text-xs text-red-600">Payment status cannot be changed because this order has been cancelled.</p>
+                          <div className="mt-3 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Current Payment Status</p>
+                              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${getPaymentStatusConfig(selectedOrder.payment_status).color}`}>
+                                {getPaymentStatusConfig(selectedOrder.payment_status).label}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : currentUserRole === 'admin' ? (
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Current Payment Status</p>
@@ -564,7 +630,7 @@ body: JSON.stringify({
                           disabled={saving}
                           className="mt-3 w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                         >
-                        <span className="text-lg font-bold">₱</span>
+                          <span className="text-lg font-bold">₱</span>
                           {saving ? 'Saving...' : 'Save Payment Status'}
                         </button>
                       )}
@@ -576,15 +642,19 @@ body: JSON.stringify({
               {/* Tracking Number */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Tracking Number</h3>
-                {currentUserRole === 'admin' ? (
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl flex items-center justify-between border-2 border-blue-200">
+                {currentUserRole === 'admin' || isCancelled ? (
+                  <div className={`p-5 rounded-xl flex items-center justify-between border-2 ${isCancelled ? 'bg-red-50 border-red-200' : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'}`}>
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Tracking Number</p>
                       <p className="font-medium text-gray-900">{selectedOrder.tracking_number || 'No tracking number'}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">👁️ View Only</p>
-                      <p className="text-xs text-gray-600 font-medium">Admins cannot modify tracking</p>
+                      <p className={`text-xs mb-1 ${isCancelled ? 'text-red-500' : 'text-gray-500'}`}>
+                        {isCancelled ? '🔒 Locked' : '👁️ View Only'}
+                      </p>
+                      <p className={`text-xs font-medium ${isCancelled ? 'text-red-600' : 'text-gray-600'}`}>
+                        {isCancelled ? 'Order is cancelled' : 'Admins cannot modify tracking'}
+                      </p>
                     </div>
                   </div>
                 ) : editingTracking ? (
@@ -620,8 +690,7 @@ body: JSON.stringify({
                       onClick={() => setEditingTracking(true)}
                       className="bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-200 px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2"
                     >
-                      <Edit2 size={14} />
-                      Edit
+                      <Edit2 size={14} /> Edit
                     </button>
                   </div>
                 )}
@@ -658,18 +727,13 @@ body: JSON.stringify({
         </div>
       )}
 
-      {/* ✅ UPDATED: Message Modal - Fully Responsive for All Screen Sizes */}
+      {/* Message Modal */}
       {showMessageModal && selectedOrder && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
-          {/* 
-            Mobile (< sm): Slides up from bottom like a sheet — full width, rounded top corners only
-            Tablet/Desktop (≥ sm): Centered dialog with max-width and rounded corners all around
-          */}
           <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col max-h-[95vh] sm:max-h-[90vh]">
 
-            {/* Modal Header — sticky, never scrolls away */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 sm:px-6 py-4 sm:py-5 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
-              {/* Drag handle pill for mobile bottom-sheet feel */}
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 sm:px-6 py-4 sm:py-5 flex items-center justify-between flex-shrink-0 rounded-t-2xl relative">
               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/40 rounded-full sm:hidden" />
               <div className="flex items-center gap-3 min-w-0">
                 <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
@@ -680,53 +744,44 @@ body: JSON.stringify({
               </div>
               <button
                 onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }}
-                className="text-white hover:bg-white/20 rounded-lg p-2 transition flex-shrink-0 ml-2 touch-manipulation"
-                aria-label="Close"
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition flex-shrink-0 ml-2"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Body — scrollable middle section */}
-            <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 sm:py-5 space-y-4">
-
-              {/* Quick Templates */}
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Quick Templates</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { type: 'update', emoji: '📝', label: 'General Update', bg: 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' },
-                    { type: 'delay', emoji: '⏰', label: 'Delay Notice', bg: 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200' },
-                    { type: 'delivery', emoji: '🚚', label: 'Delivery Today', bg: 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200' },
-                    { type: 'weather', emoji: '🌧️', label: 'Weather Delay', bg: 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200' },
+                    { type: 'update',   emoji: '📝', label: 'General Update',  bg: 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'     },
+                    { type: 'delay',    emoji: '⏰', label: 'Delay Notice',     bg: 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200' },
+                    { type: 'delivery', emoji: '🚚', label: 'Delivery Today',   bg: 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200'   },
+                    { type: 'weather',  emoji: '🌧️', label: 'Weather Delay',   bg: 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200' },
                   ].map(({ type, emoji, label, bg }) => (
-                    <button
-                      key={type}
-                      onClick={() => setMessageText(getMessageTemplate(type))}
-                      className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-medium transition border touch-manipulation text-left ${bg}`}
-                    >
-                      <span className="mr-1">{emoji}</span>
-                      {label}
+                    <button key={type} onClick={() => setMessageText(getMessageTemplate(type))}
+                      className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-medium transition border text-left ${bg}`}>
+                      <span className="mr-1">{emoji}</span>{label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Customer Info Preview */}
               <div className="p-3 sm:p-4 bg-gray-50 rounded-xl border border-gray-200">
                 <p className="text-xs sm:text-sm text-gray-500 mb-1 font-medium uppercase tracking-wide">Sending to</p>
                 <p className="font-semibold text-gray-900 text-sm sm:text-base">{selectedOrder.shipping_full_name}</p>
                 <p className="text-xs sm:text-sm text-gray-500 truncate">{selectedOrder.shipping_email}</p>
               </div>
 
-              {/* Error Message */}
               {messageError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
                   <p className="text-xs sm:text-sm text-red-700 font-medium">{messageError}</p>
                 </div>
               )}
 
-              {/* Message Textarea */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm font-semibold text-gray-700">Your Message</label>
@@ -744,7 +799,6 @@ body: JSON.stringify({
                 />
               </div>
 
-              {/* Tip Box */}
               <div className="p-3 sm:p-4 bg-blue-50 border border-blue-100 rounded-xl">
                 <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
                   <strong>💡 Tip:</strong> Clear communication helps build trust. Keep buyers informed about any changes to their order.
@@ -752,30 +806,24 @@ body: JSON.stringify({
               </div>
             </div>
 
-            {/* Modal Footer — sticky at bottom, never scrolls away */}
+            {/* Footer */}
             <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 flex gap-2 sm:gap-3 border-t border-gray-200 flex-shrink-0">
               <button
                 onClick={() => { setShowMessageModal(false); setMessageText(''); setMessageError(''); }}
                 disabled={sendingMessage}
-                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 active:bg-gray-200 transition font-semibold text-sm sm:text-base disabled:opacity-50 touch-manipulation"
+                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 transition font-semibold text-sm sm:text-base disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSendMessage}
                 disabled={!messageText.trim() || sendingMessage}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 active:from-blue-800 active:to-blue-900 transition font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg touch-manipulation"
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition font-semibold text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
               >
                 {sendingMessage ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-2 border-white border-t-transparent flex-shrink-0" />
-                    <span>Sending...</span>
-                  </>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent flex-shrink-0" /><span>Sending...</span></>
                 ) : (
-                  <>
-                    <Send className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                    <span>Send Message</span>
-                  </>
+                  <><Send className="w-4 h-4 flex-shrink-0" /><span>Send Message</span></>
                 )}
               </button>
             </div>

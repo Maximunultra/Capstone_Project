@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, DollarSign, Tag, ArrowLeft, AlertCircle } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const SellerCategoryRulesPage = () => {
   const navigate = useNavigate();

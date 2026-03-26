@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import ProductForm from '../Components/ProductForm';
 import { BookOpen } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
 
 const ProductListPage = ({ userId, userRole }) => {
   const navigate = useNavigate();
@@ -158,7 +159,6 @@ const ProductListPage = ({ userId, userRole }) => {
       setPagination(prev => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }));
   };
 
-  // ✅ Use backend-computed fields — respects discount dates
   const isDiscountActive = (product) => product.discount_active === true;
   const getEffectivePrice = (product) =>
     parseFloat(product.effective_price ?? product.price).toLocaleString('en-PH', {
@@ -451,8 +451,11 @@ const ProductListPage = ({ userId, userRole }) => {
             ) : (
               <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
                 {products.map((product) => (
-                  <div key={product.id} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:scale-105">
-                    <div className="relative h-40 bg-gray-200 overflow-hidden group">
+                  // ✅ FIX: Added flex flex-col so the card stretches and button pins to bottom
+                  <div key={product.id} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:scale-105 flex flex-col">
+
+                    {/* Image — fixed height, never shrinks */}
+                    <div className="relative h-40 bg-gray-200 overflow-hidden group flex-shrink-0">
                       {product.product_image ? (
                         <img src={product.product_image} alt={product.product_name} className="w-full h-full object-cover" />
                       ) : (
@@ -480,7 +483,6 @@ const ProductListPage = ({ userId, userRole }) => {
 
                       <div className="absolute top-2 left-2 flex flex-col gap-1">
                         {product.is_featured && <span className="bg-yellow-500 text-white text-[10px] px-1.5 py-0.5 rounded">⭐ Featured</span>}
-                        {/* ✅ Only show discount badge when discount is actually active */}
                         {isDiscountActive(product) && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded">-{product.discount_percentage}%</span>}
                         {!product.is_active && <span className="bg-gray-500 text-white text-[10px] px-1.5 py-0.5 rounded">Inactive</span>}
                         {product.approval_status === 'pending'  && <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded">⏳ Pending</span>}
@@ -495,75 +497,89 @@ const ProductListPage = ({ userId, userRole }) => {
                       )}
                     </div>
 
-                    <div className="p-3">
-                      <h3 className="font-semibold text-gray-900 mb-1 text-sm truncate">{product.product_name}</h3>
-                      {product.category && <p className="text-[10px] text-gray-500 mb-1">{product.category}</p>}
+                    {/* ✅ FIX: Content area uses flex-1 to fill remaining space, pushing button to bottom */}
+                    <div className="p-3 flex flex-col flex-1">
 
-                      {/* ✅ Price display using backend discount_active + effective_price */}
-                      <div className="mb-2">
-                        {isDiscountActive(product) ? (
-                          <div>
-                            <span className="text-base font-bold text-green-600">₱{getEffectivePrice(product)}</span>
-                            <span className="text-xs text-gray-500 line-through ml-1">
+                      {/* ✅ FIX: This wrapper grows to fill space, keeping button at bottom */}
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-gray-900 mb-1 text-sm truncate">{product.product_name}</h3>
+                        {product.category && <p className="text-[10px] text-gray-500 mb-1">{product.category}</p>}
+
+                        <div className="mb-2">
+                          {isDiscountActive(product) ? (
+                            <div>
+                              <span className="text-base font-bold text-green-600">₱{getEffectivePrice(product)}</span>
+                              <span className="text-xs text-gray-500 line-through ml-1">
+                                ₱{parseFloat(product.price).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-base font-bold text-gray-900">
                               ₱{parseFloat(product.price).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
+                          )}
+                        </div>
+
+                        <div className="text-xs text-gray-600 mb-2">
+                          <span>Stock: {product.stock_quantity}</span>
+                          {product.sold_count > 0 && <span className="ml-1">• {product.sold_count} sold</span>}
+                        </div>
+
+                        {/* Rating + Seller grouped together, no random border lines */}
+                        <div className="flex items-center justify-between mb-2 min-h-[18px]">
+                          {product.rating_average > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-yellow-500 text-xs">★</span>
+                              <span className="text-xs font-medium text-gray-800">{product.rating_average}</span>
+                              <span className="text-xs text-gray-400">({product.rating_count})</span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-300 italic">No ratings yet</span>
+                          )}
+                        </div>
+
+                        {product.users && currentUserRole === 'admin' && (
+                          <div className="flex items-center gap-1 mb-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            <span className="text-[10px] text-gray-500 truncate">{product.users.full_name}</span>
                           </div>
-                        ) : (
-                          <span className="text-base font-bold text-gray-900">
-                            ₱{parseFloat(product.price).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
+                        )}
+
+                        {currentUserRole === 'admin' && product.approval_status === 'pending' && (
+                          <div className="mb-2 flex gap-1.5">
+                            <button onClick={(e) => { e.stopPropagation(); handleApprove(product.id); }}
+                              className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
+                              ✓ Approve
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleReject(product.id); }}
+                              className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
+                              ✗ Reject
+                            </button>
+                          </div>
+                        )}
+
+                        {product.approval_status === 'rejected' && product.rejection_reason && (
+                          <div className="mb-2 p-1.5 bg-red-50 border border-red-200 rounded text-[10px] text-red-700">
+                            <strong>Reason:</strong> {product.rejection_reason}
+                          </div>
                         )}
                       </div>
 
-                      <div className="text-xs text-gray-600 mb-2">
-                        <span>Stock: {product.stock_quantity}</span>
-                        {product.sold_count > 0 && <span className="ml-1">• {product.sold_count} sold</span>}
-                      </div>
-
-                      {product.rating_average > 0 && (
-                        <div className="flex items-center mb-2">
-                          <span className="text-yellow-500 text-xs mr-1">★</span>
-                          <span className="text-xs font-medium">{product.rating_average}</span>
-                          <span className="text-xs text-gray-500 ml-1">({product.rating_count})</span>
-                        </div>
-                      )}
-
-                      {product.users && currentUserRole === 'admin' && (
-                        <div className="text-[10px] text-gray-500 mb-2 border-t pt-1">
-                          Seller: {product.users.full_name}
-                        </div>
-                      )}
-
-                      {currentUserRole === 'admin' && product.approval_status === 'pending' && (
-                        <div className="mb-2 flex gap-1.5">
-                          <button onClick={(e) => { e.stopPropagation(); handleApprove(product.id); }}
-                            className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
-                            ✓ Approve
-                          </button>
-                          <button onClick={(e) => { e.stopPropagation(); handleReject(product.id); }}
-                            className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all duration-200">
-                            ✗ Reject
-                          </button>
-                        </div>
-                      )}
-
+                      {/* ✅ FIX: Button is now always at the very bottom of every card */}
                       <button
                         onClick={() => {
                           if (currentUserRole === 'admin') navigate(`/admin/products/${product.id}`);
                           else if (currentUserRole === 'seller') navigate(`/seller/products/${product.id}`);
                           else navigate(`/buyer/products/${product.id}`);
                         }}
-                        className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2.5 px-3 rounded-xl transition-all duration-300 text-sm font-semibold shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                        className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2.5 px-3 rounded-xl transition-all duration-300 text-sm font-semibold shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-2"
                       >
                         View Details
                       </button>
-
-                      {product.approval_status === 'rejected' && product.rejection_reason && (
-                        <div className="mt-2 p-1.5 bg-red-50 border border-red-200 rounded text-[10px] text-red-700">
-                          <strong>Reason:</strong> {product.rejection_reason}
-                        </div>
-                      )}
                     </div>
+
                   </div>
                 ))}
               </div>
