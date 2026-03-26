@@ -52,6 +52,49 @@ app.use("/api/payment", paymentRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/protected", protectedRoutes);
 
+// ─────────────────────────────────────────────────────────────
+// CRON: Release expired stock reservations every 5 minutes
+// Restores stock for customers who abandoned GCash/PayPal payment
+// ─────────────────────────────────────────────────────────────
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const { data: expired } = await supabase
+      .from('stock_reservations')
+      .select('*, stock_reservation_items(*)')
+      .eq('status', 'active')
+      .lt('expires_at', new Date().toISOString());
+
+    if (!expired || expired.length === 0) return;
+
+    console.log(`⏰ Found ${expired.length} expired reservation(s) — releasing...`);
+
+    for (const reservation of expired) {
+      for (const item of reservation.stock_reservation_items) {
+        const { data: cur } = await supabase
+          .from('product')
+          .select('stock_quantity')
+          .eq('id', item.product_id)
+          .single();
+
+        if (cur) {
+          await supabase.from('product').update({
+            stock_quantity: cur.stock_quantity + item.quantity,
+            updated_at: new Date().toISOString()
+          }).eq('id', item.product_id);
+        }
+      }
+
+      await supabase.from('stock_reservations')
+        .update({ status: 'released' })
+        .eq('id', reservation.id);
+
+      console.log(`↩️ Released reservation ${reservation.id} — stock restored`);
+    }
+  } catch (err) {
+    console.error('❌ Cron release-expired-reservations error:', err);
+  }
+});
+
 // Runs every 5 minutes — marks promotions as 'expired' when end_date has passed
 cron.schedule('*/5 * * * *', async () => {
   try {

@@ -15,15 +15,18 @@ const upload  = multer({
     file.mimetype.startsWith("image/") ? cb(null, true) : cb(new Error("Images only"), false)
 });
 
-// ── Message encryption (matches messages.js) ──────────────────────────────────
-const ENC_KEY = process.env.MESSAGE_ENCRYPTION_KEY
-  ? Buffer.from(process.env.MESSAGE_ENCRYPTION_KEY, "hex")
-  : null;
+// ── Message encryption (lazy key read — matches fixed messages.js) ─────────────
+function getEncKey() {
+  const hex = process.env.MESSAGE_ENCRYPTION_KEY;
+  if (!hex) return null;
+  return Buffer.from(hex, "hex");
+}
 
 function encryptMsg(text) {
-  if (!ENC_KEY) return text;
+  const key = getEncKey();
+  if (!key) return text;
   const iv     = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   let enc = cipher.update(text, "utf8", "hex");
   enc += cipher.final("hex");
   return iv.toString("hex") + ":" + cipher.getAuthTag().toString("hex") + ":" + enc;
@@ -81,6 +84,7 @@ async function sendSystemMessage(senderId, receiverId, text, orderId = null) {
       sender_id:   senderId,
       receiver_id: receiverId,
       message:     encryptMsg(text),
+      // ✅ FIX: order_id is a UUID — no parseInt()
       order_id:    orderId || null,
       is_read:     false,
       created_at:  new Date().toISOString()
@@ -99,6 +103,7 @@ async function getAdminId() {
 
 // ── Get seller IDs from order ─────────────────────────────────────────────────
 async function getSellerIds(orderId) {
+  // ✅ FIX: orderId is a UUID string — no parseInt()
   const { data } = await supabase
     .from("orders")
     .select("order_items(product:product_id(user_id))")
@@ -110,8 +115,6 @@ async function getSellerIds(orderId) {
 }
 
 // ── Reverse analytics when a refund is approved ───────────────────────────────
-// Mirrors reverseAnalyticsOnCancellation() in orders.js but for refunds.
-// Order stays 'delivered' so we manually subtract the refunded amount.
 async function reverseAnalyticsOnRefund(orderId, refundAmount) {
   try {
     console.log("📊 Reversing analytics for approved refund, order:", orderId);
@@ -188,14 +191,9 @@ async function reverseAnalyticsOnRefund(orderId, refundAmount) {
 
     console.log("✅ Analytics reversed for refund on order:", orderId);
   } catch (error) {
-    // Non-fatal — refund approval still succeeds
     console.error("⚠️ Analytics reversal failed (non-fatal):", error.message);
   }
 }
-
-// ── Backfill: fix analytics for already-approved refunds ─────────────────────
-// Call GET /api/refunds/backfill-analytics (admin only, run once)
-// This corrects analytics for refunds that were approved BEFORE this fix was added.
 
 // ================================================================
 // POST /api/refunds
@@ -221,21 +219,14 @@ router.post("/", upload.single("evidence"), async (req, res) => {
     const isCancelled = order.order_status === "cancelled";
     const isDelivered = order.order_status === "delivered";
 
-    // Delivered orders — always eligible (any payment method)
-    // Cancelled orders — only eligible if paid online (GCash/PayPal)
-    // Cancelled COD — no refund needed (cash was never collected online)
-    if (!isDelivered && !isCancelled) {
+    if (!isDelivered && !isCancelled)
       return res.status(400).json({ success: false, error: "Only delivered or cancelled orders can be refunded" });
-    }
-    if (isCancelled && order.payment_method === "cod") {
+    if (isCancelled && order.payment_method === "cod")
       return res.status(400).json({ success: false, error: "COD cancelled orders do not require a refund — no online payment was made" });
-    }
-    if (isCancelled && order.payment_status !== "paid") {
+    if (isCancelled && order.payment_status !== "paid")
       return res.status(400).json({ success: false, error: "This order was not paid — no refund required" });
-    }
-    if (isDelivered && order.payment_status !== "paid" && order.payment_method !== "cod") {
+    if (isDelivered && order.payment_status !== "paid" && order.payment_method !== "cod")
       return res.status(400).json({ success: false, error: "Order payment was not completed" });
-    }
 
     const { data: existing } = await supabase
       .from("refund_requests").select("id, status")
@@ -252,18 +243,17 @@ router.post("/", upload.single("evidence"), async (req, res) => {
     let evidenceUrl = null;
     if (req.file) evidenceUrl = await uploadImage(req.file);
 
-    // Cancelled orders: always go to admin (no seller involvement — item not delivered)
-    // Delivered COD: goes to seller first
-    // Delivered GCash/PayPal: goes to admin
+    // ✅ FIX: order_id is a UUID — no parseInt()
     const isCancelledOrder = order.order_status === "cancelled";
-    const sellerIds       = (!isCancelledOrder && order.payment_method === "cod") ? await getSellerIds(parseInt(order_id)) : [];
-    const primarySellerId = sellerIds[0] || null;
-    const initialStatus   = (!isCancelledOrder && order.payment_method === "cod") ? "seller_pending" : "pending";
+    const sellerIds        = (!isCancelledOrder && order.payment_method === "cod") ? await getSellerIds(order_id) : [];
+    const primarySellerId  = sellerIds[0] || null;
+    const initialStatus    = (!isCancelledOrder && order.payment_method === "cod") ? "seller_pending" : "pending";
 
     const { data: refundReq, error: insertErr } = await supabase
       .from("refund_requests")
       .insert({
-        order_id:           parseInt(order_id),
+        // ✅ FIX: order_id is a UUID — no parseInt()
+        order_id:           order_id,
         user_id,
         seller_id:          primarySellerId,
         reason,
@@ -283,7 +273,6 @@ router.post("/", upload.single("evidence"), async (req, res) => {
     if (insertErr) throw insertErr;
 
     // COD delivered: notify seller to arrange return
-    // Cancelled orders skip seller notification — item was never delivered
     if (!isCancelledOrder && order.payment_method === "cod" && sellerIds.length > 0) {
       const { data: orderData } = await supabase
         .from("orders").select("order_number").eq("id", order_id).single();
@@ -300,13 +289,13 @@ router.post("/", upload.single("evidence"), async (req, res) => {
         `Reply here to start coordinating with the buyer.`;
 
       for (const sellerId of sellerIds) {
-        await sendSystemMessage(user_id, sellerId, sellerNotif, parseInt(order_id));
+        // ✅ FIX: order_id is a UUID — no parseInt()
+        await sendSystemMessage(user_id, sellerId, sellerNotif, order_id);
       }
     }
 
     console.log(`✅ Refund request #${refundReq.id} created (${initialStatus})`);
 
-    // ── Log activity ──────────────────────────────────────────────────────
     await logActivity({
       userId:      user_id,
       role:        "buyer",
@@ -337,10 +326,6 @@ router.post("/", upload.single("evidence"), async (req, res) => {
 // ================================================================
 router.get("/stats", async (req, res) => {
   try {
-    // Fetch refund requests with order status so we can correctly compute
-    // total_refunded — only count refunds on DELIVERED orders.
-    // Cancelled-order refunds are excluded because those orders were never
-    // in analytics (revenue is only recorded on delivery).
     const { data, error } = await supabase
       .from("refund_requests")
       .select("status, refund_amount, order:order_id(order_status)");
@@ -349,19 +334,19 @@ router.get("/stats", async (req, res) => {
     const all      = data || [];
     const approved = all.filter(r => r.status === "approved");
 
-    // Only sum refunds where the original order was delivered
-    const totalRefunded = approved
-      .filter(r => r.order?.order_status === "delivered")
-      .reduce((s, r) => s + parseFloat(r.refund_amount || 0), 0);
+    const deliveredRefunds  = approved.filter(r => r.order?.order_status === "delivered");
+    const totalRefunded     = deliveredRefunds.reduce((s, r) => s + parseFloat(r.refund_amount || 0), 0);
+    const deliveredApproved = deliveredRefunds.length;
 
     res.json({
       success: true,
       stats: {
-        pending:        all.filter(r => r.status === "pending").length,
-        seller_pending: all.filter(r => r.status === "seller_pending").length,
-        approved:       approved.length,
-        rejected:       all.filter(r => r.status === "rejected").length,
-        total_refunded: totalRefunded.toFixed(2)
+        pending:            all.filter(r => r.status === "pending").length,
+        seller_pending:     all.filter(r => r.status === "seller_pending").length,
+        approved:           approved.length,
+        approved_delivered: deliveredApproved,
+        rejected:           all.filter(r => r.status === "rejected").length,
+        total_refunded:     totalRefunded.toFixed(2)
       }
     });
   } catch (error) {
@@ -371,11 +356,9 @@ router.get("/stats", async (req, res) => {
 
 // ================================================================
 // GET /api/refunds/backfill-analytics  (admin — run once)
-// Fixes analytics for refunds approved before this feature was added
 // ================================================================
 router.get("/backfill-analytics", async (req, res) => {
   try {
-    // Fetch all already-approved refunds
     const { data: approvedRefunds, error } = await supabase
       .from("refund_requests")
       .select("id, order_id, refund_amount, analytics_reversed")
@@ -393,35 +376,23 @@ router.get("/backfill-analytics", async (req, res) => {
       });
     }
 
-    console.log(`📊 Backfilling analytics for ${toFix.length} approved refund(s)...`);
-
-    let fixed = 0;
-    let failed = 0;
+    let fixed = 0, failed = 0;
 
     for (const refund of toFix) {
       try {
         await reverseAnalyticsOnRefund(refund.order_id, refund.refund_amount);
-
-        // Mark as reversed so we don't double-count on future runs
         await supabase
           .from("refund_requests")
           .update({ analytics_reversed: true, updated_at: new Date().toISOString() })
           .eq("id", refund.id);
-
         fixed++;
-        console.log(`✅ Backfilled refund #${refund.id}`);
       } catch (e) {
         failed++;
         console.error(`❌ Failed to backfill refund #${refund.id}:`, e.message);
       }
     }
 
-    res.json({
-      success: true,
-      message: `Backfill complete. Fixed: ${fixed}, Failed: ${failed}`,
-      fixed,
-      failed
-    });
+    res.json({ success: true, message: `Backfill complete. Fixed: ${fixed}, Failed: ${failed}`, fixed, failed });
   } catch (error) {
     console.error("❌ Backfill error:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -538,7 +509,6 @@ router.patch("/:id/seller-confirm", upload.single("proof"), async (req, res) => 
 
     if (updateErr) throw updateErr;
 
-    // Notify admin
     const adminId = await getAdminId();
     if (adminId) {
       const { data: orderData } = await supabase
@@ -552,10 +522,10 @@ router.patch("/:id/seller-confirm", upload.single("proof"), async (req, res) => 
         `${seller_notes ? `Seller notes: ${seller_notes}\n\n` : ""}` +
         `Please go to the Refunds page to approve the final refund to the buyer.`;
 
+      // ✅ FIX: order_id is a UUID — no parseInt()
       await sendSystemMessage(seller_id, adminId, adminMsg, refReq.order_id);
     }
 
-    // ── Log activity ──────────────────────────────────────────────────────
     await logActivity({
       userId:      seller_id,
       role:        "seller",
@@ -615,7 +585,6 @@ router.patch("/:id/approve", async (req, res) => {
           { headers: { Authorization: `Basic ${PM_AUTH}`, "Content-Type": "application/json" } }
         );
         gatewayResult = { method: "gcash", status: "issued", refund_id: refundRes.data?.id };
-        console.log("✅ GCash refund issued:", refundRes.data?.id);
       } catch (gwErr) {
         return res.status(502).json({
           success: false,
@@ -634,7 +603,6 @@ router.patch("/:id/approve", async (req, res) => {
           { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
         );
         gatewayResult = { method: "paypal", status: "issued", refund_id: ppRes.id };
-        console.log("✅ PayPal refund issued:", ppRes.id);
       } catch (gwErr) {
         return res.status(502).json({
           success: false,
@@ -648,6 +616,7 @@ router.patch("/:id/approve", async (req, res) => {
       if (req_.seller_id) {
         const { data: orderData } = await supabase
           .from("orders").select("order_number").eq("id", req_.order_id).single();
+        // ✅ FIX: order_id is a UUID — no parseInt()
         await sendSystemMessage(admin_id, req_.seller_id,
           `[COD Refund — Final Approval]\n\nOrder #${orderData?.order_number} — ₱${parseFloat(req_.refund_amount).toFixed(2)}\n\n` +
           `Admin has approved the refund. Please transfer ₱${parseFloat(req_.refund_amount).toFixed(2)} to the buyer via GCash or cash.\n\n` +
@@ -657,7 +626,6 @@ router.patch("/:id/approve", async (req, res) => {
       }
     }
 
-    // Update status
     const now = new Date().toISOString();
     const { data: updated, error: updateErr } = await supabase
       .from("refund_requests")
@@ -667,18 +635,14 @@ router.patch("/:id/approve", async (req, res) => {
         reviewed_by:         admin_id,
         reviewed_at:         now,
         refunded_at:         gatewayResult.status === "issued" ? now : null,
-        analytics_reversed:  true,   // ← mark so backfill skips it
+        analytics_reversed:  true,
         updated_at:          now
       })
       .eq("id", req.params.id).select().single();
 
     if (updateErr) throw updateErr;
 
-    // ── Reverse analytics ONLY if order was delivered ─────────────────────
-    // Analytics only records revenue when an order reaches 'delivered' status.
-    // If the order was cancelled before delivery (common with GCash/PayPal),
-    // it was never added to analytics — so there is nothing to reverse.
-    // Reversing a non-delivered order would incorrectly drive revenue negative.
+    // Only reverse analytics if order was delivered
     const { data: refundedOrder } = await supabase
       .from("orders")
       .select("order_status")
@@ -688,20 +652,15 @@ router.patch("/:id/approve", async (req, res) => {
     if (refundedOrder?.order_status === "delivered") {
       await reverseAnalyticsOnRefund(req_.order_id, req_.refund_amount);
     } else {
-      console.log(
-        `ℹ️ Skipping analytics reversal for refund #${req.params.id} — ` +
-        `order #${req_.order_id} status is '${refundedOrder?.order_status}', ` +
-        `not 'delivered'. No analytics were recorded for this order.`
-      );
+      console.log(`ℹ️ Skipping analytics reversal — order status is '${refundedOrder?.order_status}', not 'delivered'.`);
     }
 
-    // ── Log activity ──────────────────────────────────────────────────────
     await logActivity({
       userId:      admin_id,
       role:        "admin",
       action:      "refund_approved",
       category:    "refund",
-      description: `Admin approved refund of ₱${parseFloat(req_.refund_amount).toFixed(2)} for Order #${req_.order_id} via ${req_.payment_method?.toUpperCase()} — ${gatewayResult.status === "issued" ? "auto-refunded via gateway" : "manual transfer required"}`,
+      description: `Admin approved refund of ₱${parseFloat(req_.refund_amount).toFixed(2)} for Order #${req_.order_id} via ${req_.payment_method?.toUpperCase()}`,
       metadata:    { refund_id: req.params.id, order_id: req_.order_id, amount: req_.refund_amount, payment_method: req_.payment_method, gateway_status: gatewayResult.status, gateway_refund_id: gatewayResult.refund_id || null, admin_notes: admin_notes || null },
       req,
     });
@@ -755,17 +714,16 @@ router.patch("/:id/reject", async (req, res) => {
 
     if (error) throw error;
 
-    // Notify seller if COD
     if (req_.seller_id) {
       const { data: orderData } = await supabase
         .from("orders").select("order_number").eq("id", req_.order_id).single();
+      // ✅ FIX: order_id is a UUID — no parseInt()
       await sendSystemMessage(admin_id, req_.seller_id,
         `[COD Refund Rejected]\n\nOrder #${orderData?.order_number} — The refund request has been rejected by admin.\n${admin_notes ? `Reason: ${admin_notes}` : ""}`,
         req_.order_id
       );
     }
 
-    // ── Log activity ──────────────────────────────────────────────────────
     await logActivity({
       userId:      admin_id,
       role:        "admin",
@@ -784,32 +742,17 @@ router.patch("/:id/reject", async (req, res) => {
 });
 
 // ================================================================
-// BACKFILL SCRIPT — Fix incorrectly deducted analytics
-// Run once via: GET /api/refunds/backfill-wrong-refunds
-//
-// This fixes analytics that were incorrectly reduced by refunds
-// on cancelled/pending orders (orders that were never delivered
-// and therefore never added to analytics in the first place).
+// GET /api/refunds/backfill-wrong-refunds  (admin — run once)
 // ================================================================
-
 router.get("/backfill-wrong-refunds", async (req, res) => {
   try {
-    console.log("🔧 Starting backfill for incorrectly deducted analytics...");
-
-    // Find all approved refunds where the order was NOT delivered
     const { data: allApprovedRefunds, error } = await supabase
       .from("refund_requests")
-      .select(`
-        id, order_id, refund_amount, analytics_reversed,
-        order:order_id ( order_status, order_date, order_number )
-      `)
+      .select(`id, order_id, refund_amount, analytics_reversed, order:order_id ( order_status, order_date, order_number )`)
       .eq("status", "approved");
 
     if (error) throw error;
 
-    // Filter to only the wrongly-deducted ones:
-    // analytics_reversed = true  → reverseAnalyticsOnRefund() was called
-    // order_status != 'delivered' → the order was never in analytics
     const wronglyDeducted = (allApprovedRefunds || []).filter(r =>
       r.analytics_reversed === true &&
       r.order?.order_status !== "delivered"
@@ -824,10 +767,7 @@ router.get("/backfill-wrong-refunds", async (req, res) => {
       });
     }
 
-    console.log(`⚠️ Found ${wronglyDeducted.length} incorrectly deducted refund(s). Adding back...`);
-
-    let fixed = 0;
-    let failed = 0;
+    let fixed = 0, failed = 0;
     const details = [];
 
     for (const refund of wronglyDeducted) {
@@ -838,7 +778,6 @@ router.get("/backfill-wrong-refunds", async (req, res) => {
         const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
         const amount      = parseFloat(refund.refund_amount || 0);
 
-        // Fetch the order items to know what was wrongly reversed
         const { data: orderItems } = await supabase
           .from("order_items")
           .select("quantity, unit_price, product_category, product_id")
@@ -847,27 +786,18 @@ router.get("/backfill-wrong-refunds", async (req, res) => {
         const items      = orderItems || [];
         const totalItems = items.reduce((s, i) => s + i.quantity, 0);
 
-        // ── 1. ADD BACK to monthly summary ───────────────────────────
         const { data: monthly } = await supabase
-          .from("analytics_monthly_summary")
-          .select("*")
-          .eq("year", year)
-          .eq("month", month)
-          .maybeSingle();
+          .from("analytics_monthly_summary").select("*")
+          .eq("year", year).eq("month", month).maybeSingle();
 
         if (monthly) {
-          await supabase
-            .from("analytics_monthly_summary")
-            .update({
-              total_revenue:    parseFloat(monthly.total_revenue    || 0) + amount,
-              total_items_sold: (monthly.total_items_sold || 0)           + totalItems,
-              updated_at:       new Date().toISOString()
-            })
-            .eq("year", year)
-            .eq("month", month);
+          await supabase.from("analytics_monthly_summary").update({
+            total_revenue:    parseFloat(monthly.total_revenue    || 0) + amount,
+            total_items_sold: (monthly.total_items_sold || 0)           + totalItems,
+            updated_at:       new Date().toISOString()
+          }).eq("year", year).eq("month", month);
         }
 
-        // ── 2. ADD BACK to category analytics ────────────────────────
         const catMap = {};
         items.forEach(i => {
           const cat = i.product_category || "Uncategorized";
@@ -878,75 +808,46 @@ router.get("/backfill-wrong-refunds", async (req, res) => {
 
         for (const [category, stats] of Object.entries(catMap)) {
           const { data: cat } = await supabase
-            .from("analytics_category")
-            .select("*")
-            .eq("category", category)
-            .eq("period_type", "monthly")
-            .eq("period_start", periodStart)
-            .maybeSingle();
-
+            .from("analytics_category").select("*")
+            .eq("category", category).eq("period_type", "monthly")
+            .eq("period_start", periodStart).maybeSingle();
           if (cat) {
-            await supabase
-              .from("analytics_category")
-              .update({
-                total_revenue: parseFloat(cat.total_revenue || 0) + stats.revenue,
-                items_sold:    (cat.items_sold || 0)               + stats.items,
-                updated_at:    new Date().toISOString()
-              })
-              .eq("category", category)
-              .eq("period_type", "monthly")
-              .eq("period_start", periodStart);
+            await supabase.from("analytics_category").update({
+              total_revenue: parseFloat(cat.total_revenue || 0) + stats.revenue,
+              items_sold:    (cat.items_sold || 0)               + stats.items,
+              updated_at:    new Date().toISOString()
+            }).eq("category", category).eq("period_type", "monthly").eq("period_start", periodStart);
           }
         }
 
-        // ── 3. ADD BACK to product analytics ─────────────────────────
         for (const item of items) {
           const { data: prod } = await supabase
-            .from("analytics_product")
-            .select("*")
-            .eq("product_id", item.product_id)
-            .eq("period_type", "monthly")
-            .eq("period_start", periodStart)
-            .maybeSingle();
-
+            .from("analytics_product").select("*")
+            .eq("product_id", item.product_id).eq("period_type", "monthly")
+            .eq("period_start", periodStart).maybeSingle();
           if (prod) {
             const itemRevenue = item.quantity * parseFloat(item.unit_price || 0);
-            await supabase
-              .from("analytics_product")
-              .update({
-                units_sold:    (prod.units_sold    || 0) + item.quantity,
-                total_revenue: parseFloat(prod.total_revenue || 0) + itemRevenue,
-                updated_at:    new Date().toISOString()
-              })
-              .eq("product_id", item.product_id)
-              .eq("period_type", "monthly")
-              .eq("period_start", periodStart);
+            await supabase.from("analytics_product").update({
+              units_sold:    (prod.units_sold    || 0) + item.quantity,
+              total_revenue: parseFloat(prod.total_revenue || 0) + itemRevenue,
+              updated_at:    new Date().toISOString()
+            }).eq("product_id", item.product_id).eq("period_type", "monthly").eq("period_start", periodStart);
           }
         }
 
-        // ── 4. Mark this refund so we don't re-process it ─────────────
-        // Set analytics_reversed = false since analytics were never correct
-        // for this refund. The new logic will now correctly skip it.
-        await supabase
-          .from("refund_requests")
-          .update({
-            analytics_reversed: false,
-            updated_at:         new Date().toISOString()
-          })
+        await supabase.from("refund_requests")
+          .update({ analytics_reversed: false, updated_at: new Date().toISOString() })
           .eq("id", refund.id);
 
         fixed++;
         details.push({
-          refund_id:    refund.id,
-          order_id:     refund.order_id,
-          order_number: refund.order?.order_number,
-          order_status: refund.order?.order_status,
+          refund_id:         refund.id,
+          order_id:          refund.order_id,
+          order_number:      refund.order?.order_number,
+          order_status:      refund.order?.order_status,
           amount_added_back: amount.toFixed(2),
-          period:       `${year}-${String(month).padStart(2, "0")}`,
+          period:            `${year}-${String(month).padStart(2, "0")}`,
         });
-
-        console.log(`✅ Fixed refund #${refund.id} — added back ₱${amount.toFixed(2)} to ${year}-${month} analytics`);
-
       } catch (e) {
         failed++;
         console.error(`❌ Failed to fix refund #${refund.id}:`, e.message);
@@ -956,13 +857,12 @@ router.get("/backfill-wrong-refunds", async (req, res) => {
     res.json({
       success: true,
       message: `Backfill complete. Fixed: ${fixed}, Failed: ${failed}`,
-      checked:  allApprovedRefunds?.length || 0,
-      wrong:    wronglyDeducted.length,
+      checked: allApprovedRefunds?.length || 0,
+      wrong:   wronglyDeducted.length,
       fixed,
       failed,
       details,
     });
-
   } catch (error) {
     console.error("❌ Backfill error:", error);
     res.status(500).json({ success: false, error: error.message });

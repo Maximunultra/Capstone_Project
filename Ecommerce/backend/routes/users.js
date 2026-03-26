@@ -283,20 +283,23 @@ router.put("/:id", async (req, res) => {
 
     // ── Activity log ──────────────────────────────────────────────────────────
     const changedFields = Object.keys(u).filter(k => k !== 'updated_at' && k !== 'password_hash');
-    const actorId   = req.body.admin_id || id;
-    const actorRole = req.body.admin_id ? 'admin' : (data.role || 'user');
+    const adminId   = req.body.admin_id || req.headers['x-admin-id'] || null;
+    const actorId   = adminId || id;
+    const actorRole = adminId ? 'admin' : (data.role || 'user');
+    const isAdminAction = !!adminId;
 
     await logActivity({
-      userId:   actorId,
+      userId:   actorId,          // ✅ now reliably the admin's ID when admin acts
       role:     actorRole,
       action:   'user_updated',
       category: 'user',
-      description: req.body.admin_id
-        ? `Admin updated profile for ${data.full_name} (${data.email})`
-        : `${data.full_name} updated their profile`,
+      description: isAdminAction
+        ? `Admin (ID: ${adminId}) updated profile for ${data.full_name} (${data.email})`
+        : `${data.full_name} updated their own profile`,
       metadata: {
-        updated_user_id:  id,
-        updated_by:       actorId,
+        updated_user_id:  id,          // the seller being edited
+        updated_by:       actorId,     // who made the change
+        is_admin_action:  isAdminAction,
         fields_changed:   changedFields,
         password_changed: !!u.password_hash,
         email:            data.email,

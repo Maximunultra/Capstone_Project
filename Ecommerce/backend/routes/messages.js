@@ -19,7 +19,7 @@ async function uploadMessageImage(file) {
   const filePath = `messages/${fileName}`;
 
   const { error } = await supabase.storage
-    .from('product-images')        // same bucket as product images
+    .from('product-images')
     .upload(filePath, file.buffer, { contentType: file.mimetype, cacheControl: '3600' });
 
   if (error) throw error;
@@ -33,22 +33,24 @@ async function uploadMessageImage(file) {
 
 const router = express.Router();
 
-// Encryption configuration
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-
-const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY 
-  ? Buffer.from(process.env.MESSAGE_ENCRYPTION_KEY, 'hex')
-  : crypto.randomBytes(32);
-
 const IV_LENGTH = 16;
 
-console.log('🔐 Encryption enabled:', !!process.env.MESSAGE_ENCRYPTION_KEY);
-console.log('🔑 Key buffer length:', ENCRYPTION_KEY.length, 'bytes (should be 32)');
+// ✅ FIX: Read the key lazily inside each function instead of at module load time.
+// The top-level const ran before dotenv.config() populated process.env, so it
+// always got undefined and fell back to crypto.randomBytes(32) — a random key
+// that changed on every server restart, making all stored messages unreadable.
+function getEncryptionKey() {
+  const keyHex = process.env.MESSAGE_ENCRYPTION_KEY;
+  if (!keyHex) throw new Error('MESSAGE_ENCRYPTION_KEY is not set in environment variables');
+  return Buffer.from(keyHex, 'hex');
+}
 
 function encryptMessage(text) {
   try {
+    const key = getEncryptionKey();
     const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
     const authTag = cipher.getAuthTag();
@@ -60,15 +62,17 @@ function encryptMessage(text) {
 }
 
 function decryptMessage(encryptedText) {
+  if (!encryptedText) return '';
   try {
+    const key = getEncryptionKey();
     const parts = encryptedText.split(':');
-    if (parts.length !== 3) throw new Error('Invalid encrypted message format');
-    const iv = Buffer.from(parts[0], 'hex');
+    if (parts.length !== 3) return encryptedText; // not encrypted — return as-is
+    if (!/^[0-9a-f]+$/i.test(parts[0])) return encryptedText; // not a valid IV hex
+    const iv      = Buffer.from(parts[0], 'hex');
     const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = parts[2];
-    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    let decrypted = decipher.update(parts[2], 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
   } catch (error) {
@@ -111,11 +115,11 @@ async function fetchMessageContext(orderId, productId) {
 
       if (orderData) {
         context.order = {
-          id: orderData.id,
+          id:           orderData.id,
           order_number: orderData.order_number,
           order_status: orderData.order_status,
           total_amount: orderData.total_amount,
-          items: orderData.order_items || []
+          items:        orderData.order_items || []
         };
 
         // If no explicit productId, use the first item from the order
@@ -123,12 +127,12 @@ async function fetchMessageContext(orderId, productId) {
           const firstItem = orderData.order_items[0];
           context.product = firstItem.product
             ? {
-                id: firstItem.product.id,
-                product_name: firstItem.product_name || firstItem.product.product_name,
+                id:            firstItem.product.id,
+                product_name:  firstItem.product_name || firstItem.product.product_name,
                 product_image: firstItem.product.product_image,
-                brand: firstItem.product.brand,
-                quantity: firstItem.quantity,
-                unit_price: firstItem.unit_price
+                brand:         firstItem.product.brand,
+                quantity:      firstItem.quantity,
+                unit_price:    firstItem.unit_price
               }
             : null;
         }
@@ -148,11 +152,11 @@ async function fetchMessageContext(orderId, productId) {
 
       if (productData) {
         context.product = {
-          id: productData.id,
-          product_name: productData.product_name,
+          id:            productData.id,
+          product_name:  productData.product_name,
           product_image: productData.product_image,
-          brand: productData.brand,
-          price: productData.price
+          brand:         productData.brand,
+          price:         productData.price
         };
       }
     } catch (err) {
@@ -181,8 +185,6 @@ router.post("/", upload.single('image'), async (req, res) => {
       }
     }
 
-    console.log('📨 Original message:', message);
-
     if (!sender_id || !receiver_id) {
       return res.status(400).json({
         success: false,
@@ -204,8 +206,7 @@ router.post("/", upload.single('image'), async (req, res) => {
       });
     }
 
-    // Admins bypass order-party validation — both when admin is sending (reply)
-    // and when admin is receiving (buyer contacting support about an order).
+    // Admins bypass order-party validation
     let adminIsInvolved = false;
     try {
       const { data: users } = await supabase
@@ -229,26 +230,22 @@ router.post("/", upload.single('image'), async (req, res) => {
         `)
         .eq("id", order_id)
         .single();
-      
-      if (orderError) {
-        return res.status(404).json({ success: false, error: 'Order not found', details: orderError.message });
-      }
 
-      if (!orderData) {
-        return res.status(404).json({ success: false, error: 'Order not found' });
+      if (orderError || !orderData) {
+        return res.status(404).json({ success: false, error: 'Order not found', details: orderError?.message });
       }
 
       const sellerIds = orderData.order_items.map(item => item.product?.user_id).filter(id => id !== null);
-      const isBuyer = orderData.user_id === sender_id;
-      const isSeller = sellerIds.includes(sender_id);
-      
+      const isBuyer   = orderData.user_id === sender_id;
+      const isSeller  = sellerIds.includes(sender_id);
+
       if (!isBuyer && !isSeller) {
         return res.status(403).json({ success: false, error: 'You do not have permission to send messages about this order' });
       }
 
-      const isReceiverBuyer = orderData.user_id === receiver_id;
+      const isReceiverBuyer  = orderData.user_id === receiver_id;
       const isReceiverSeller = sellerIds.includes(receiver_id);
-      
+
       if (!isReceiverBuyer && !isReceiverSeller) {
         return res.status(403).json({ success: false, error: 'Invalid receiver for this order' });
       }
@@ -259,15 +256,16 @@ router.post("/", upload.single('image'), async (req, res) => {
       }
     }
 
-    const encryptedMessage = message ? encryptMessage(message) : encryptMessage('');
+    const encryptedMessage = encryptMessage(message || '');
 
     const messageData = {
       sender_id:   sender_id.toString(),
       receiver_id: receiver_id.toString(),
       message:     encryptedMessage,
       image_url:   image_url || null,
-      order_id:    order_id  ? parseInt(order_id)  : null,
-      product_id:  product_id ? parseInt(product_id) : null,
+      // ✅ FIX: order_id and product_id are UUIDs — do NOT parseInt() them
+      order_id:    order_id   || null,
+      product_id:  product_id || null,
       is_read:     false,
       created_at:  new Date().toISOString()
     };
@@ -283,23 +281,20 @@ router.post("/", upload.single('image'), async (req, res) => {
         success: false,
         error: 'Failed to insert message',
         details: insertError.message,
-        hint: insertError.hint,
-        code: insertError.code
+        hint:    insertError.hint,
+        code:    insertError.code
       });
     }
 
-    // Fetch order/product context to include in response
     const context = await fetchMessageContext(newMessage.order_id, newMessage.product_id);
 
     const decryptedMessage = {
       ...newMessage,
-      message:   decryptMessage(newMessage.message),
-      image_url: newMessage.image_url || null,
+      message:         decryptMessage(newMessage.message),
+      image_url:       newMessage.image_url || null,
       order_context:   context.order,
       product_context: context.product
     };
-
-    console.log('✅ Message sent successfully with context');
 
     res.status(201).json({
       success: true,
@@ -315,7 +310,6 @@ router.post("/", upload.single('image'), async (req, res) => {
 
 /**
  * GET /api/messages/conversation/:userId1/:userId2
- * Get conversation between two users — includes order/product context per message
  */
 router.get("/conversation/:userId1/:userId2", async (req, res) => {
   try {
@@ -333,13 +327,13 @@ router.get("/conversation/:userId1/:userId2", async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Collect unique (order_id, product_id) pairs to batch-fetch context
+    // Batch-fetch context by unique (order_id, product_id) pairs
     const contextCache = new Map();
-    const contextKeys = [...new Set(data.map(m => `${m.order_id || 'null'}_${m.product_id || 'null'}`))]
+    const contextKeys  = [...new Set(data.map(m => `${m.order_id || 'null'}_${m.product_id || 'null'}`))]
 
     await Promise.all(
       contextKeys.map(async (key) => {
-        const [oid, pid] = key.split('_').map(v => v === 'null' ? null : parseInt(v));
+        const [oid, pid] = key.split('_').map(v => v === 'null' ? null : v); // ✅ no parseInt — UUIDs
         const ctx = await fetchMessageContext(oid, pid);
         contextCache.set(key, ctx);
       })
@@ -367,7 +361,6 @@ router.get("/conversation/:userId1/:userId2", async (req, res) => {
 
 /**
  * GET /api/messages/user/:userId
- * Get all conversations for a user — last message gets order/product context for preview
  */
 router.get("/user/:userId", async (req, res) => {
   try {
@@ -396,7 +389,7 @@ router.get("/user/:userId", async (req, res) => {
 
     const conversationsMap = new Map();
 
-    // Gather unique context keys from the latest message per conversation
+    // Latest message per conversation (for context preview)
     const latestMsgPerConv = new Map();
     messages.forEach(msg => {
       const otherUserId = msg.sender_id === userId ? msg.receiver_id : msg.sender_id;
@@ -417,34 +410,33 @@ router.get("/user/:userId", async (req, res) => {
 
     messages.forEach(msg => {
       const otherUserId = msg.sender_id === userId ? msg.receiver_id : msg.sender_id;
-      const otherUser = userMap.get(otherUserId);
-      const decryptedMessage = decryptMessage(msg.message);
+      const otherUser   = userMap.get(otherUserId);
+      const decryptedMsg = decryptMessage(msg.message);
 
       if (!conversationsMap.has(otherUserId)) {
         const latestMsg = latestMsgPerConv.get(otherUserId);
-        const ctxKey = `${latestMsg.order_id || 'null'}_${latestMsg.product_id || 'null'}`;
-        const ctx = contextCache.get(ctxKey) || { order: null, product: null };
+        const ctxKey    = `${latestMsg.order_id || 'null'}_${latestMsg.product_id || 'null'}`;
+        const ctx       = contextCache.get(ctxKey) || { order: null, product: null };
 
         conversationsMap.set(otherUserId, {
-          other_user_id: otherUserId,
-          other_user_name: otherUser?.full_name || 'Unknown User',
-          other_user_email: otherUser?.email || '',
-          last_message: decryptedMessage,
-          last_message_time: msg.created_at,
-          last_order_context: ctx.order,
+          other_user_id:        otherUserId,
+          other_user_name:      otherUser?.full_name || 'Unknown User',
+          other_user_email:     otherUser?.email || '',
+          last_message:         decryptedMsg,
+          last_message_time:    msg.created_at,
+          last_order_context:   ctx.order,
           last_product_context: ctx.product,
-          unread_count: 0,
-          messages: []
+          unread_count:         0,
+          messages:             []
         });
       }
 
       const conversation = conversationsMap.get(otherUserId);
-      conversation.messages.push({ ...msg, message: decryptedMessage, image_url: msg.image_url || null });
+      conversation.messages.push({ ...msg, message: decryptedMsg, image_url: msg.image_url || null });
       if (msg.receiver_id === userId && !msg.is_read) conversation.unread_count++;
     });
 
     const conversations = Array.from(conversationsMap.values());
-
     res.json({ success: true, conversations, count: conversations.length });
 
   } catch (error) {
@@ -467,8 +459,10 @@ router.get("/order/:orderId", async (req, res) => {
 
     if (error) throw error;
 
-    // All messages share the same order — fetch once
-    const ctx = data.length > 0 ? await fetchMessageContext(parseInt(orderId), data[0].product_id) : { order: null, product: null };
+    // All messages share the same order — fetch context once
+    const ctx = data.length > 0
+      ? await fetchMessageContext(orderId, data[0].product_id)
+      : { order: null, product: null };
 
     const decryptedMessages = data.map(msg => ({
       ...msg,
@@ -507,8 +501,8 @@ router.patch("/:messageId/read", async (req, res) => {
     const ctx = await fetchMessageContext(data.order_id, data.product_id);
     const decryptedData = {
       ...data,
-      message: decryptMessage(data.message),
-      order_context: ctx.order,
+      message:         decryptMessage(data.message),
+      order_context:   ctx.order,
       product_context: ctx.product
     };
 
