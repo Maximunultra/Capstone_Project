@@ -4,19 +4,17 @@ import { Package, CheckCircle, ShoppingBag, Mail, Store, AlertCircle, ChevronDow
 import OrdersPage from './OrdersPage';
 import MessagesTab from './MessagesTab';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
 // const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const CART_LIMIT = 10;
 
-// ── ✅ Format number with commas ───────────────────────────────────
 const formatPrice = (amount) => {
   const num = parseFloat(amount);
   if (isNaN(num)) return '0.00';
   return num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-// ── ✅ Get store name (mirrors Productlistpage's getStoreName) ──────
 const getStoreName = (product) => {
   if (!product) return null;
   return (
@@ -26,6 +24,39 @@ const getStoreName = (product) => {
     product.brand ||
     null
   );
+};
+
+// ── Toast Notification ─────────────────────────────────────────────
+const Toast = ({ toasts, removeToast }) => (
+<div className="fixed top-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">  
+    {toasts.map(t => (
+      <div key={t.id}
+        className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-medium max-w-sm animate-slideUp
+          ${t.type === 'error'   ? 'bg-red-50 border-red-200 text-red-800'
+          : t.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800'
+          : t.type === 'success' ? 'bg-green-50 border-green-200 text-green-800'
+          :                        'bg-blue-50 border-blue-200 text-blue-800'}`}>
+        <span className="text-base leading-none mt-0.5">
+          {t.type === 'error' ? '❌' : t.type === 'warning' ? '⚠️' : t.type === 'success' ? '✅' : 'ℹ️'}
+        </span>
+        <span className="flex-1 leading-snug">{t.message}</span>
+        <button onClick={() => removeToast(t.id)} className="opacity-50 hover:opacity-100 transition ml-1">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    ))}
+  </div>
+);
+
+const useToast = () => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  }, []);
+  const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
+  return { toasts, addToast, removeToast };
 };
 
 // ── Shipping Breakdown Component ───────────────────────────────────
@@ -146,6 +177,8 @@ const Checkbox = ({ checked, indeterminate = false, onChange }) => (
 const CartPage = ({ userId }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { toasts, addToast, removeToast } = useToast();
+
   const [activeTab, setActiveTab] = useState('cart');
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -164,10 +197,9 @@ const CartPage = ({ userId }) => {
   const [defaultAddress, setDefaultAddress] = useState(null);
   const [shippingFees, setShippingFees] = useState({});
 
-  // ✅ Per-item checkout selection — starts with all items selected
   const [selectedCheckoutItems, setSelectedCheckoutItems] = useState(new Set());
-
   const [priceChangedItems, setPriceChangedItems] = useState(new Set());
+  const [suspension, setSuspension] = useState(null);
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
   const totalCartItems = cartItems.length;
@@ -183,6 +215,14 @@ const CartPage = ({ userId }) => {
     if (!currentUserId) { navigate('/login'); return; }
     if (activeTab === 'cart') { fetchCartItems(); fetchDefaultAddress(); }
   }, [currentUserId, activeTab]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    fetch(`${API_BASE_URL}/orders/check-suspension/${currentUserId}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setSuspension(d); })
+      .catch(() => {});
+  }, [currentUserId]);
 
   useEffect(() => {
     if (activeTab !== 'cart') return;
@@ -231,7 +271,6 @@ const CartPage = ({ userId }) => {
       setHasChanges(false);
       setCheckedItems(new Set());
       setSelectionMode(false);
-      // ✅ Do NOT auto-select — users must manually choose what to checkout
       setSelectedCheckoutItems(new Set());
     } catch (err) {
       setError(err.message);
@@ -345,11 +384,11 @@ const CartPage = ({ userId }) => {
           const remaining = cartItems.filter(i => !checkedItems.has(i.id));
           setCartItems(remaining);
           setCheckedItems(new Set());
-          // Keep only previously selected checkout items that still exist
           setSelectedCheckoutItems(prev => new Set([...prev].filter(id => remaining.some(r => r.id === id))));
           if (remaining.length === 0) exitSelectionMode();
+          addToast(`${checkedItems.size} item${checkedItems.size > 1 ? 's' : ''} removed from cart.`, 'success');
         } catch (err) {
-          alert('Error removing items: ' + err.message);
+          addToast('Error removing items. Please try again.', 'error');
         } finally {
           setLoading(false);
         }
@@ -379,10 +418,10 @@ const CartPage = ({ userId }) => {
         })
       ));
       setHasChanges(false);
-      alert('Cart updated successfully!');
+      addToast('Cart updated successfully!', 'success');
       await fetchCartItems();
     } catch (err) {
-      alert('Error updating cart: ' + err.message);
+      addToast('Error updating cart. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -402,14 +441,14 @@ const CartPage = ({ userId }) => {
           setCheckedItems(prev => { const n = new Set(prev); n.delete(cartItemId); return n; });
           setSelectedCheckoutItems(prev => { const n = new Set(prev); n.delete(cartItemId); return n; });
           if (remaining.length === 0) exitSelectionMode();
+          addToast('Item removed from cart.', 'success');
         } catch (err) {
-          alert('Error removing item: ' + err.message);
+          addToast('Error removing item. Please try again.', 'error');
         }
       }
     });
   };
 
-  // Price helpers
   const getLivePrice = (product) => {
     if (!product) return 0;
     const base = parseFloat(product.price);
@@ -425,7 +464,6 @@ const CartPage = ({ userId }) => {
   const isGroupShippingLoading = (sellerId) => shippingFees[sellerId]?.loading === true;
   const getGroupTotal = (sellerId, items) => { const s = getGroupSubtotal(items); const sh = getGroupShippingFee(sellerId); return sh === null ? s : s + sh; };
 
-  // ✅ Per-item checkout selection helpers
   const toggleCheckoutItem = (itemId) => {
     setSelectedCheckoutItems(prev => { const n = new Set(prev); n.has(itemId) ? n.delete(itemId) : n.add(itemId); return n; });
   };
@@ -448,10 +486,8 @@ const CartPage = ({ userId }) => {
     return 'some';
   };
 
-  // Items selected for checkout
   const itemsForCheckout = cartItems.filter(i => selectedCheckoutItems.has(i.id));
 
-  // Group selected items by seller
   const checkoutSellerGroups = (() => {
     const groups = {};
     itemsForCheckout.forEach(item => {
@@ -465,26 +501,29 @@ const CartPage = ({ userId }) => {
 
   const checkoutHasMultipleSellers = checkoutSellerGroups.length > 1;
 
-  // Summary of selected items
   const selectedSubtotal = itemsForCheckout.reduce((s, i) => s + getItemPrice(i) * i.quantity, 0);
   const selectedShipping = checkoutSellerGroups.reduce((s, g) => { const fee = getGroupShippingFee(g.sellerId); return s + (fee !== null ? fee : 0); }, 0);
   const selectedTotal = selectedSubtotal + selectedShipping;
 
-  // ✅ Checkout handler using selected items
   const handleCheckout = async () => {
-    if (itemsForCheckout.length === 0) {
+    if (suspension?.suspended) {
       setConfirmDialog({
-        message: 'No items selected',
-        subMessage: 'Please tick the checkboxes next to the items you want to purchase.',
-        confirmLabel: 'Got it', danger: false, onConfirm: () => setConfirmDialog(null)
+        message: 'Checkout Suspended',
+        subMessage: suspension.message ||
+          `Your checkout is suspended for ${suspension.hours_left} more hour${suspension.hours_left !== 1 ? 's' : ''} due to repeated order cancellations. You can still browse, add to cart, message sellers, and view your orders.`,
+        confirmLabel: 'Got it',
+        danger: false,
+        onConfirm: () => setConfirmDialog(null),
       });
       return;
     }
+
+    if (itemsForCheckout.length === 0) {
+      addToast('Please select items you want to purchase.', 'warning');
+      return;
+    }
     if (hasChanges) {
-      setConfirmDialog({
-        message: 'Unsaved changes', subMessage: 'Please update your cart before proceeding to checkout.',
-        confirmLabel: 'OK', danger: false, onConfirm: () => setConfirmDialog(null)
-      });
+      addToast('Please update your cart before proceeding to checkout.', 'warning');
       return;
     }
     if (checkoutHasMultipleSellers) {
@@ -496,7 +535,6 @@ const CartPage = ({ userId }) => {
       return;
     }
 
-    // Stock check
     setLoading(true);
     try {
       const stockErrors = [];
@@ -510,7 +548,7 @@ const CartPage = ({ userId }) => {
             stockErrors.push(`"${product.product_name}" has been removed by the seller.`);
           } else if (product.stock_quantity < item.quantity) {
             stockErrors.push(product.stock_quantity === 0
-              ? `"${product.product_name}" is now out of stock.`
+              ? `"${product.product_name}" is now out of stock. Or Browse Different products.`
               : `"${product.product_name}" only has ${product.stock_quantity} left (you want ${item.quantity}).`
             );
           }
@@ -521,7 +559,8 @@ const CartPage = ({ userId }) => {
 
       if (stockErrors.length > 0) {
         setConfirmDialog({
-          message: '⚠️ Some items are unavailable', subMessage: stockErrors.join('\n'),
+          message: '⚠️ Some items are unavailable',
+          subMessage: stockErrors.join('\n'),
           confirmLabel: 'Update Cart', danger: false,
           onConfirm: () => { setConfirmDialog(null); fetchCartItems(); }
         });
@@ -531,7 +570,7 @@ const CartPage = ({ userId }) => {
       const sellerId = checkoutSellerGroups[0]?.sellerId || null;
       navigate('/buyer/checkout', { state: { checkoutItems: itemsForCheckout, sellerId } });
     } catch {
-      alert('Could not verify item availability. Please try again.');
+      addToast('Could not verify item availability. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -540,7 +579,6 @@ const CartPage = ({ userId }) => {
   const handleTabChange = (tab) => { setActiveTab(tab); navigate(`/buyer/cart?tab=${tab}`, { replace: true }); };
   const toggleGroup = (sellerId) => { setCollapsedGroups(prev => ({ ...prev, [sellerId]: !prev[sellerId] })); };
 
-  // ── Render a single cart item ──────────────────────────────────────
   const renderCartItem = (item) => {
     const isDeleteChecked = checkedItems.has(item.id);
     const isCheckoutSelected = selectedCheckoutItems.has(item.id);
@@ -548,8 +586,6 @@ const CartPage = ({ userId }) => {
     const savedPrice = parseFloat(item.price) || 0;
     const priceWasUpdated = priceChangedItems.has(item.id) || Math.abs(livePrice - savedPrice) > 0.001;
     const isOutOfStock = item.product?.stock_quantity === 0;
-
-    // ✅ Get store name the same way as Productlistpage
     const storeName = getStoreName(item.product);
 
     return (
@@ -560,21 +596,18 @@ const CartPage = ({ userId }) => {
       }`}>
         <div className="flex gap-4 items-start">
 
-          {/* ✅ Checkout selection checkbox (normal mode) */}
           {!selectionMode && (
             <div className="pt-1 flex-shrink-0">
               <Checkbox checked={isCheckoutSelected} onChange={() => toggleCheckoutItem(item.id)} />
             </div>
           )}
 
-          {/* Delete mode checkbox */}
           {selectionMode && (
             <div className="pt-1 flex-shrink-0">
               <Checkbox checked={isDeleteChecked} onChange={() => toggleItem(item.id)} />
             </div>
           )}
 
-          {/* ✅ Product image with out-of-stock overlay (mirrors Productlistpage) */}
           <div
             className="relative w-20 h-20 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 cursor-pointer border-2 border-transparent group-hover:border-blue-200 transition"
             onClick={() => navigate(`/buyer/products/${item.product_id}`)}>
@@ -582,7 +615,6 @@ const CartPage = ({ userId }) => {
               ? <img src={item.product.product_image} alt={item.product?.product_name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
               : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package className="w-8 h-8" /></div>
             }
-            {/* ✅ Out-of-stock dim overlay */}
             {isOutOfStock && (
               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center rounded-xl">
                 <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[9px] font-semibold leading-tight text-center">OUT OF{'\n'}STOCK</span>
@@ -598,7 +630,6 @@ const CartPage = ({ userId }) => {
                   {item.product?.product_name}
                 </h3>
 
-                {/* ✅ Store name with store icon — mirrors Productlistpage */}
                 {storeName && (
                   <p className="text-xs text-gray-500 font-medium mb-0.5 flex items-center gap-1 truncate">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -615,7 +646,6 @@ const CartPage = ({ userId }) => {
                   </p>
                 )}
 
-                {/* ✅ Out-of-stock text badge below name */}
                 {isOutOfStock && (
                   <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium text-red-600 bg-red-50">
                     Out of stock
@@ -738,6 +768,8 @@ const CartPage = ({ userId }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30 py-8 px-4">
 
+      <Toast toasts={toasts} removeToast={removeToast} />
+
       {/* Confirm Dialog */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -778,6 +810,28 @@ const CartPage = ({ userId }) => {
             {activeTab === 'messages' && 'Communicate with sellers'}
           </p>
         </div>
+
+        {/* Suspension banner */}
+        {suspension?.suspended && activeTab === 'cart' && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl px-5 py-4 mb-6 flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <p className="font-bold text-red-800 text-sm">Checkout Suspended</p>
+                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">{suspension.hours_left}h remaining</span>
+              </div>
+              <p className="text-xs text-red-700">
+                Due to repeated cancellations, checkout is blocked until{' '}
+                <strong>{new Date(suspension.suspended_until).toLocaleDateString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</strong>.
+                You can still <strong>add to cart, message sellers</strong>, and view your orders.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6 overflow-hidden">
@@ -877,7 +931,6 @@ const CartPage = ({ userId }) => {
                       )}
                     </div>
 
-                    {/* ✅ Selection hint bar */}
                     {!selectionMode && cartItems.length > 0 && (
                       <div className="bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3 flex items-center gap-3">
                         <CheckCircle className="w-4 h-4 text-blue-500 flex-shrink-0" />
@@ -914,10 +967,8 @@ const CartPage = ({ userId }) => {
                       return (
                         <div key={group.sellerId} className="bg-white rounded-2xl shadow-sm border-2 border-gray-100 overflow-hidden transition-all">
 
-                          {/* Group header */}
                           <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-100">
                             <div className="flex items-center gap-3">
-                              {/* ✅ Group checkout checkbox */}
                               {!selectionMode && (
                                 <Checkbox
                                   checked={checkoutGroupState === 'all'}
@@ -1025,7 +1076,6 @@ const CartPage = ({ userId }) => {
                         </div>
                       </div>
 
-                      {/* ✅ Selected items summary */}
                       {itemsForCheckout.length > 0 ? (
                         <>
                           {checkoutHasMultipleSellers && (
@@ -1037,7 +1087,6 @@ const CartPage = ({ userId }) => {
                             </div>
                           )}
 
-                          {/* Per-item breakdown */}
                           <div className="mb-4 space-y-1.5 max-h-36 overflow-y-auto pr-1">
                             {itemsForCheckout.map(item => (
                               <div key={item.id} className="flex items-center justify-between text-xs gap-2">
@@ -1086,14 +1135,18 @@ const CartPage = ({ userId }) => {
 
                       <button
                         onClick={handleCheckout}
-                        disabled={hasChanges || itemsForCheckout.length === 0 || checkoutHasMultipleSellers || loading}
+                        disabled={hasChanges || itemsForCheckout.length === 0 || checkoutHasMultipleSellers || loading || suspension?.suspended}
                         className={`w-full py-4 px-6 rounded-xl transition font-bold text-base flex items-center justify-center gap-2 ${
-                          hasChanges || itemsForCheckout.length === 0 || checkoutHasMultipleSellers || loading
-                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                            : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl'
+                          suspension?.suspended
+                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
+                            : hasChanges || itemsForCheckout.length === 0 || checkoutHasMultipleSellers || loading
+                              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl'
                         }`}>
                         {loading ? (
                           <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Checking availability...</>
+                        ) : suspension?.suspended ? (
+                          <>🚫 Checkout suspended</>
                         ) : (
                           <><CheckCircle className="w-5 h-5" />
                             {checkoutHasMultipleSellers ? 'Select 1 seller only'
@@ -1103,12 +1156,16 @@ const CartPage = ({ userId }) => {
                         )}
                       </button>
 
-                      {hasChanges && <p className="text-xs text-orange-600 text-center mt-3 font-medium">Please update cart first</p>}
-                      {checkoutHasMultipleSellers && !hasChanges && (
+                      {suspension?.suspended && (
+                        <p className="text-xs text-red-500 text-center mt-3 font-medium">
+                          Suspended for {suspension.hours_left} more hour{suspension.hours_left !== 1 ? 's' : ''}
+                        </p>
+                      )}
+                      {hasChanges && !suspension?.suspended && <p className="text-xs text-orange-600 text-center mt-3 font-medium">Please update cart first</p>}
+                      {checkoutHasMultipleSellers && !hasChanges && !suspension?.suspended && (
                         <p className="text-xs text-amber-600 text-center mt-3 font-medium">Deselect items from other sellers to continue</p>
                       )}
 
-                      {/* Unselected items reminder */}
                       {itemsForCheckout.length > 0 && itemsForCheckout.length < cartItems.length && (
                         <div className="mt-5 pt-5 border-t border-gray-200">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
@@ -1128,10 +1185,6 @@ const CartPage = ({ userId }) => {
 
                       {/* Trust badges */}
                       <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
-                        <div className="flex items-start gap-3">
-                          
-                          
-                        </div>
                         <div className="flex items-start gap-3">
                           <div className="w-8 h-8 bg-blue-50 rounded-full flex items-center justify-center flex-shrink-0">
                             <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1159,6 +1212,8 @@ const CartPage = ({ userId }) => {
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slideUp { animation: slideUp 0.25s ease-out; }
       `}</style>
     </div>
   );

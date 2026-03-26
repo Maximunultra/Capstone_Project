@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { X, Upload, AlertCircle, CheckCircle, Clock, XCircle } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const REFUND_REASONS = [
   'Item not as described',

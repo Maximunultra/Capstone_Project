@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const Productlistpage = ({ userId, userRole }) => {
   const navigate = useNavigate();
@@ -33,6 +33,7 @@ const Productlistpage = ({ userId, userRole }) => {
   const [showCartLimitModal, setShowCartLimitModal] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // ✅ FIX: suspension state (was missing — Buy Now button had no effect on disabled state)
   const [suspension, setSuspension] = useState(null);
 
   const currentUserId   = userId   || JSON.parse(localStorage.getItem('user') || '{}').id;
@@ -43,6 +44,7 @@ const Productlistpage = ({ userId, userRole }) => {
     if (sellerId) navigate(`/buyer/store/${sellerId}`);
   };
 
+  // ✅ Fetch suspension status on mount
   useEffect(() => {
     if (!currentUserId) return;
     fetch(`${API_BASE_URL}/orders/check-suspension/${currentUserId}`)
@@ -52,11 +54,15 @@ const Productlistpage = ({ userId, userRole }) => {
   }, [currentUserId]);
 
   const categories = [
-    { id: 'all',        label: 'All' },
-    { id: 'Accessories',label: 'Accessories' },
+    { id: 'all', label: 'All Collections' },
+    { id: 'Bag', label: 'Bag' },
+    { id: 'Foods', label: 'Foods' },
+    { id: 'Furniture', label: 'Furniture' },
     { id: 'Home Decor', label: 'Home Decor' },
-    { id: 'Kitchen',    label: 'Kitchen' },
-    { id: 'Clothing',   label: 'Clothing' },
+    { id: 'Jewelry', label: 'Jewelry' },
+    { id: 'Pottery & Crafts', label: 'Pottery & Crafts' },
+    { id: 'Textiles', label: 'Textiles' },
+    { id: 'Clothing', label: 'Clothing' },
   ];
 
   const priceRanges = [
@@ -80,11 +86,9 @@ const Productlistpage = ({ userId, userRole }) => {
     return users.store_name || users.full_name || null;
   };
 
-  // ── Price helpers ────────────────────────────────────────────
   const formatPrice = (value) =>
     parseFloat(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // ✅ Use backend-computed fields — respects discount start/end dates
   const isDiscountActive = (p) => p.discount_active === true;
 
   const getEffectivePrice = (p) =>
@@ -195,6 +199,7 @@ const Productlistpage = ({ userId, userRole }) => {
       return;
     }
 
+    // Live stock pre-check (shared for both cart and buy now)
     try {
       const stockRes = await fetch(`${API_BASE_URL}/products/${selectedProduct.id}`);
       if (stockRes.ok) {
@@ -220,18 +225,53 @@ const Productlistpage = ({ userId, userRole }) => {
         }
       }
     } catch {
-      console.warn('Stock pre-check failed, proceeding to cart add');
+      console.warn('Stock pre-check failed, proceeding');
     }
 
-    if (modalAction === 'buynow' && suspension?.suspended) {
+    // ✅ FIX BUG 2: Buy Now goes DIRECTLY to checkout — never touches the cart API.
+    // Previously the cart POST ran unconditionally for both actions, leaving a ghost
+    // cart row behind every Buy Now purchase.
+    if (modalAction === 'buynow') {
+      if (suspension?.suspended) {
+        closeModal();
+        showToast(
+          `Checkout suspended for ${suspension.hours_left} more hour${suspension.hours_left !== 1 ? 's' : ''}. You can still add items to your cart.`,
+          'error'
+        );
+        return;
+      }
+
+      const buyNowItem = {
+        id:         null,           // no cart row — Buy Now bypasses cart entirely
+        product_id: selectedProduct.id,
+        quantity:   quantity,
+        price:      selectedProduct.effective_price ?? selectedProduct.price,
+        product: {
+          id:             selectedProduct.id,
+          product_name:   selectedProduct.product_name,
+          product_image:  selectedProduct.product_image,
+          price:          selectedProduct.price,
+          brand:          selectedProduct.brand,
+          category:       selectedProduct.category,
+          weight:         selectedProduct.weight,
+          weight_unit:    selectedProduct.weight_unit,
+          stock_quantity: selectedProduct.stock_quantity,
+          user_id:        selectedProduct.user_id,
+          seller_name:    selectedProduct.users?.store_name || selectedProduct.users?.full_name || null,
+        }
+      };
+
       closeModal();
-      showToast(
-        `Checkout suspended for ${suspension.hours_left} more hour${suspension.hours_left !== 1 ? 's' : ''}. You can still add items to your cart.`,
-        'error'
-      );
-      return;
+      navigate('/buyer/checkout', {
+        state: {
+          checkoutItems: [buyNowItem],
+          sellerId:      selectedProduct.user_id,
+        }
+      });
+      return; // ← early return: cart API is never called for Buy Now
     }
 
+    // Add to cart only (modalAction === 'cart')
     try {
       const addResponse = await fetch(`${API_BASE_URL}/cart`, {
         method: 'POST',
@@ -243,39 +283,14 @@ const Productlistpage = ({ userId, userRole }) => {
         if (errorData.cart_limit_reached) { closeModal(); setShowCartLimitModal(true); return; }
         throw new Error(errorData.error || 'Failed to add to cart');
       }
-      if (modalAction === 'cart') {
-        closeModal(); showToast(`"${selectedProduct.product_name}" added to cart!`); fetchCartCount(); return;
-      }
-      const cartResponse = await fetch(`${API_BASE_URL}/cart/${currentUserId}`);
-      if (!cartResponse.ok) throw new Error('Failed to fetch cart');
-      const cartData = await cartResponse.json();
-      const allCartItems    = cartData.cart_items || [];
-      const currentSellerId = selectedProduct.user_id;
-      const otherSellerItems = allCartItems.filter(item => item.product?.user_id && item.product.user_id !== currentSellerId);
-      const thisSellerItems  = allCartItems.filter(item => item.product?.user_id === currentSellerId);
       closeModal();
-      if (otherSellerItems.length > 0) {
-        const otherSellers = {};
-        otherSellerItems.forEach(item => {
-          const sid   = item.product.user_id;
-          const sname = item.product.seller_name || item.product.brand || `Seller ${sid.slice(0, 6)}`;
-          if (!otherSellers[sid]) otherSellers[sid] = { name: sname, count: 0 };
-          otherSellers[sid].count += item.quantity;
-        });
-        setConfirmModalData({ otherSellers: Object.values(otherSellers), thisSellerItems, currentSellerId, sellerName: selectedProduct.seller_name || selectedProduct.brand || 'this seller', productName: selectedProduct.product_name });
-        setShowConfirmModal(true);
-      } else {
-        navigate('/buyer/checkout', { state: { checkoutItems: thisSellerItems, sellerId: currentSellerId } });
-      }
+      showToast(`"${selectedProduct.product_name}" added to cart!`);
+      fetchCartCount();
     } catch (err) { showToast(err.message, 'error'); }
   };
 
-  const handleConfirmProceed = () => {
-    if (!confirmModalData) return;
-    setShowConfirmModal(false);
-    navigate('/buyer/checkout', { state: { checkoutItems: confirmModalData.thisSellerItems, sellerId: confirmModalData.currentSellerId } });
-  };
-  const handleConfirmCancel = () => { setShowConfirmModal(false); setConfirmModalData(null); };
+  const handleConfirmProceed = () => { setShowConfirmModal(false); };
+  const handleConfirmCancel  = () => { setShowConfirmModal(false); setConfirmModalData(null); };
   const handleProductClick  = (id) => navigate(`/buyer/products/${id}`);
 
   const nextPage = () => {
@@ -534,7 +549,6 @@ const Productlistpage = ({ userId, userRole }) => {
                     )}
                     <div className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 flex flex-col gap-1">
                       {product.is_featured && <span className="bg-yellow-500 text-white text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-medium">Featured</span>}
-                      {/* ✅ Only show discount badge when discount is actually active */}
                       {isDiscountActive(product) && <span className="bg-red-500 text-white text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md font-medium">-{product.discount_percentage}%</span>}
                     </div>
                     {product.stock_quantity === 0 && (
@@ -565,7 +579,6 @@ const Productlistpage = ({ userId, userRole }) => {
                       )}
                       {product.category && <p className="text-[10px] sm:text-xs text-gray-500 mb-1.5 sm:mb-2 truncate">{product.category}</p>}
 
-                      {/* ✅ Price display using backend discount_active + effective_price */}
                       <div className="mb-2 sm:mb-3">
                         {isDiscountActive(product) ? (
                           <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
@@ -665,7 +678,6 @@ const Productlistpage = ({ userId, userRole }) => {
                     </p>
                   )}
                   {selectedProduct.category && <p className="text-xs sm:text-sm text-gray-500 mb-2">{selectedProduct.category}</p>}
-                  {/* ✅ Modal price uses discount_active + effective_price */}
                   {isDiscountActive(selectedProduct) ? (
                     <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="text-lg sm:text-xl font-bold text-green-600">₱{getEffectivePrice(selectedProduct)}</span>

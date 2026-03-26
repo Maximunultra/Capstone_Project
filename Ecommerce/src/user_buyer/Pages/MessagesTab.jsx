@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Send, Search, Package, ShoppingBag, Hash, ChevronDown, ChevronUp, HeadphonesIcon, Shield, X, Paperclip, Clock, CheckCircle, XCircle, RefreshCcw, AlertCircle } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ORDER / PRODUCT CONTEXT COMPONENTS
@@ -231,10 +231,10 @@ const MyRefundsPanel = ({ userId }) => {
             <p className="text-sm font-semibold text-green-800 mb-1">Refund Approved!</p>
             <p className="text-xs text-green-700">
               {selected.payment_method === 'gcash'
-                ? 'Your refund is being processed via GCash. It will appear in your wallet within 5–10 business days.'
+                ? 'Your refund is being processed via GCash. It will appear in your wallet within 5–10 days.'
                 : selected.payment_method === 'paypal'
-                ? 'Your refund is being processed via PayPal. It will appear in your account within 3–5 business days.'
-                : 'Your refund will be transferred manually by the seller. Please expect contact within 2 business days.'}
+                ? 'Your refund is being processed via PayPal. It will appear in your account within 3–5  days.'
+                : 'Your refund will be transferred manually by the seller. Please expect contact within 2  days.'}
             </p>
           </div>
         )}

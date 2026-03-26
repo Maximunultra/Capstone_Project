@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PromotionPopup from '../../Components/PromotionPopup';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const BuyerDashboard = ({ userId, userRole }) => {
   const navigate = useNavigate();

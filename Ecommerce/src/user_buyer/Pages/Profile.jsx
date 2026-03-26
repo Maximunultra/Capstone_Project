@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Mail, Phone, MapPin, Edit2, Save, X, FileText, Calendar, Shield, AlertCircle, Camera, Loader2, Lock, Eye, EyeOff, KeyRound, AtSign } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const Profile = () => {
   const navigate = useNavigate();

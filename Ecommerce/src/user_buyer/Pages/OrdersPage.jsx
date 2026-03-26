@@ -1,53 +1,207 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Truck, CheckCircle, Clock, MapPin, MessageCircle, Calendar, Hash, User, X, Send, Star, HeadphonesIcon, Shield, AlertTriangle } from 'lucide-react';
 import RefundRequestModal from '../Components/RefundRequestModal';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELIVERY ESTIMATE HELPER
+// TOAST NOTIFICATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-const getDeliveryEstimate = (city = '', orderDate = new Date()) => {
-  const normalized = city.trim().toLowerCase().replace(/\s+/g, '');
-  const isLegazpi  = normalized === 'legazpi' || normalized === 'legazpicity';
-  const base       = new Date(orderDate);
-  const fmt = (d) => d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+const Toast = ({ toasts, removeToast }) => (
+  <div className="fixed  top-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+    {toasts.map(t => (
+      <div key={t.id}
+        className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-medium max-w-sm animate-slideUp
+          ${t.type === 'error'   ? 'bg-red-50 border-red-200 text-red-800'
+          : t.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800'
+          : t.type === 'success' ? 'bg-green-50 border-green-200 text-green-800'
+          :                        'bg-blue-50 border-blue-200 text-blue-800'}`}>
+        <span className="text-base leading-none mt-0.5">
+          {t.type === 'error' ? '❌' : t.type === 'warning' ? '⚠️' : t.type === 'success' ? '✅' : 'ℹ️'}
+        </span>
+        <span className="flex-1 leading-snug">{t.message}</span>
+        <button onClick={() => removeToast(t.id)} className="opacity-50 hover:opacity-100 transition ml-1">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    ))}
+  </div>
+);
 
-  if (isLegazpi) {
-    const today    = new Date(base);
-    const tomorrow = new Date(base);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return { label: 'Today or Tomorrow', range: `${fmt(today)} – ${fmt(tomorrow)}`, days: '0–1 day', isLocal: true };
-  }
-  const min = new Date(base); min.setDate(min.getDate() + 3);
-  const max = new Date(base); max.setDate(max.getDate() + 4);
-  return { label: '3–4 Business Days', range: `${fmt(min)} – ${fmt(max)}`, days: '3–4 days', isLocal: false };
+const useToast = () => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((message, type = 'info', duration = 5000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  }, []);
+  const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
+  return { toasts, addToast, removeToast };
 };
 
-const DeliveryPill = ({ city, orderDate }) => {
-  if (!city) return null;
-  const est = getDeliveryEstimate(city, orderDate);
+// ─────────────────────────────────────────────────────────────────────────────
+// INFO DIALOG (replaces alert for important messages)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const InfoDialog = ({ dialog, onClose }) => {
+  if (!dialog) return null;
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${est.isLocal ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-      {est.isLocal ? '🏠' : '🚚'} {est.days}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9998] p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className={`px-6 py-5 flex items-start gap-4 border-b ${dialog.danger ? 'bg-red-50 border-red-100' : dialog.success ? 'bg-green-50 border-green-100' : 'bg-blue-50 border-blue-100'}`}>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-lg ${dialog.danger ? 'bg-red-100' : dialog.success ? 'bg-green-100' : 'bg-blue-100'}`}>
+            {dialog.icon || (dialog.danger ? '❌' : dialog.success ? '✅' : 'ℹ️')}
+          </div>
+          <div className="flex-1">
+            <h3 className={`font-bold text-base ${dialog.danger ? 'text-red-900' : dialog.success ? 'text-green-900' : 'text-blue-900'}`}>{dialog.title}</h3>
+            {dialog.body && (
+              <p className={`text-sm mt-1 whitespace-pre-line leading-relaxed ${dialog.danger ? 'text-red-700' : dialog.success ? 'text-green-700' : 'text-blue-700'}`}>
+                {dialog.body}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="px-6 py-4 flex gap-3 justify-end">
+          {dialog.showCancel && (
+            <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition font-medium text-sm">
+              Cancel
+            </button>
+          )}
+          <button
+            onClick={() => { dialog.onConfirm?.(); onClose(); }}
+            className={`px-5 py-2 rounded-lg text-white font-semibold text-sm transition ${
+              dialog.danger ? 'bg-red-600 hover:bg-red-700'
+              : dialog.success ? 'bg-green-600 hover:bg-green-700'
+              : 'bg-blue-600 hover:bg-blue-700'
+            }`}>
+            {dialog.confirmLabel || 'OK'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELIVERY ESTIMATE HELPER — LBC from Legazpi City, Bicol
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getDeliveryEstimate = (city = '', province = '', orderDate = new Date()) => {
+  const fmt      = d => d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+  const addDays  = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+  const base     = new Date(orderDate);
+
+  const cityNorm     = city.trim().toLowerCase().replace(/\s+/g, '');
+  const provinceNorm = province.trim().toLowerCase();
+
+  // Same city — Legazpi
+  if (cityNorm === 'legazpicity' || cityNorm === 'legazpi') {
+    return {
+      label: 'Same Day – Next Day', days: '0–1 day',
+      range: `${fmt(base)} – ${fmt(addDays(base, 1))}`,
+      icon: '🏠', color: 'green', isLocal: true,
+    };
+  }
+
+  // Bicol Region
+  const bicolProvinces = ['albay', 'camarines sur', 'camarines norte', 'sorsogon', 'masbate', 'catanduanes'];
+  if (bicolProvinces.some(p => provinceNorm.includes(p))) {
+    return {
+      label: '2–3 Business Days', days: '2–3 days',
+      range: `${fmt(addDays(base, 2))} – ${fmt(addDays(base, 3))}`,
+      icon: '📦', color: 'blue', isLocal: false,
+    };
+  }
+
+  // Luzon
+  const luzonProvinces = [
+    'metro manila', 'ncr', 'manila', 'quezon city', 'laguna', 'batangas', 'cavite',
+    'rizal', 'bulacan', 'pampanga', 'nueva ecija', 'tarlac', 'pangasinan',
+    'ilocos', 'la union', 'benguet', 'nueva vizcaya', 'quirino', 'aurora',
+    'bataan', 'zambales', 'quezon', 'marinduque', 'occidental mindoro',
+    'oriental mindoro', 'palawan', 'romblon', 'mindoro',
+  ];
+  if (luzonProvinces.some(p => provinceNorm.includes(p))) {
+    return {
+      label: '3–5 Business Days', days: '3–5 days',
+      range: `${fmt(addDays(base, 3))} – ${fmt(addDays(base, 5))}`,
+      icon: '🚚', color: 'blue', isLocal: false,
+    };
+  }
+
+  // Visayas
+  const visayasProvinces = [
+    'cebu', 'bohol', 'leyte', 'samar', 'negros', 'iloilo', 'capiz', 'aklan',
+    'antique', 'guimaras', 'biliran', 'eastern samar', 'northern samar',
+    'western samar', 'southern leyte', 'siquijor',
+  ];
+  if (visayasProvinces.some(p => provinceNorm.includes(p))) {
+    return {
+      label: '5–7 Business Days', days: '5–7 days',
+      range: `${fmt(addDays(base, 5))} – ${fmt(addDays(base, 7))}`,
+      icon: '✈️', color: 'orange', isLocal: false,
+    };
+  }
+
+  // Mindanao
+  const mindanaoProvinces = [
+    'davao', 'bukidnon', 'misamis', 'cagayan de oro', 'zamboanga', 'lanao',
+    'sultan kudarat', 'sarangani', 'south cotabato', 'north cotabato',
+    'maguindanao', 'basilan', 'sulu', 'tawi-tawi', 'agusan', 'surigao',
+    'dinagat', 'compostela',
+  ];
+  if (mindanaoProvinces.some(p => provinceNorm.includes(p))) {
+    return {
+      label: '7–10 Business Days', days: '7–10 days',
+      range: `${fmt(addDays(base, 7))} – ${fmt(addDays(base, 10))}`,
+      icon: '🛳️', color: 'red', isLocal: false,
+    };
+  }
+
+  // Fallback
+  return {
+    label: '3–7 Business Days', days: '3–7 days',
+    range: `${fmt(addDays(base, 3))} – ${fmt(addDays(base, 7))}`,
+    icon: '🚚', color: 'blue', isLocal: false,
+  };
+};
+
+const colorMap = {
+  green:  { pill: 'bg-green-100 text-green-700',   bg: 'bg-green-50',  border: 'border-green-200',  title: 'text-green-800',  sub: 'text-green-700',  note: 'text-green-600'  },
+  blue:   { pill: 'bg-blue-100 text-blue-700',     bg: 'bg-blue-50',   border: 'border-blue-200',   title: 'text-blue-800',   sub: 'text-blue-700',   note: 'text-blue-600'   },
+  orange: { pill: 'bg-orange-100 text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200', title: 'text-orange-800', sub: 'text-orange-700', note: 'text-orange-600' },
+  red:    { pill: 'bg-red-100 text-red-700',       bg: 'bg-red-50',    border: 'border-red-200',    title: 'text-red-800',    sub: 'text-red-700',    note: 'text-red-600'    },
+};
+
+const DeliveryPill = ({ city, province, orderDate }) => {
+  if (!city && !province) return null;
+  const est = getDeliveryEstimate(city || '', province || '', orderDate);
+  const c   = colorMap[est.color] || colorMap.blue;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${c.pill}`}>
+      {est.icon} {est.days}
     </span>
   );
 };
 
-const DeliveryBanner = ({ city, orderDate }) => {
-  if (!city) return null;
-  const est = getDeliveryEstimate(city, orderDate);
+const DeliveryBanner = ({ city, province, orderDate }) => {
+  if (!city && !province) return null;
+  const est = getDeliveryEstimate(city || '', province || '', orderDate);
+  const c   = colorMap[est.color] || colorMap.blue;
   return (
-    <div className={`rounded-xl p-4 border flex gap-3 items-start ${est.isLocal ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
-      <span className="text-2xl flex-shrink-0 mt-0.5">{est.isLocal ? '🏠' : '🚚'}</span>
+    <div className={`rounded-xl p-4 border flex gap-3 items-start ${c.bg} ${c.border}`}>
+      <span className="text-2xl flex-shrink-0 mt-0.5">{est.icon}</span>
       <div>
-        <p className={`font-semibold text-sm ${est.isLocal ? 'text-green-800' : 'text-blue-800'}`}>Estimated Delivery: {est.label}</p>
-        <p className={`text-xs mt-1 font-medium ${est.isLocal ? 'text-green-700' : 'text-blue-700'}`}>Expected: {est.range}</p>
-        <p className={`text-xs mt-0.5 ${est.isLocal ? 'text-green-600' : 'text-blue-600'}`}>
-          {est.isLocal ? '📍 Within Legazpi City — same/next day delivery' : '📦 Outside Legazpi City — standard delivery'}
+        <p className={`font-semibold text-sm ${c.title}`}>Estimated Delivery: {est.label}</p>
+        <p className={`text-xs mt-1 font-medium ${c.sub}`}>Expected: {est.range}</p>
+        <p className={`text-xs mt-0.5 ${c.note}`}>
+           Business days only, excluding holidays
+        </p>
+        <p className={`text-xs mt-0.5 opacity-70 ${c.note}`}>
+          Tracking number will be provided once seller ships your order.
         </p>
       </div>
     </div>
@@ -68,30 +222,30 @@ const SUPPORT_SUBJECTS = [
 ];
 
 const ContactSupportModal = ({ userId, adminId, adminLoading, selectedOrder, onClose, onSent }) => {
-  const [subject,  setSubject]  = useState(selectedOrder ? 'Problem with my order' : '');
-  const [body,     setBody]     = useState('');
-  const [sending,  setSending]  = useState(false);
-  const [error,    setError]    = useState('');
+  const [subject, setSubject] = useState(selectedOrder ? 'Problem with my order' : '');
+  const [body,    setBody]    = useState('');
+  const [sending, setSending] = useState(false);
+  const [error,   setError]   = useState('');
 
   const handleSend = async () => {
     setError('');
-    if (!subject) { setError('Please select a subject.'); return; }
-    if (!body.trim()) { setError('Please enter your message.'); return; }
-    if (body.trim().length < 10) { setError('Message must be at least 10 characters.'); return; }
-    if (!adminId) { setError('Could not reach support. Please email us directly at support@artisan.com'); return; }
+    if (!subject)              { setError('Please select a subject.'); return; }
+    if (!body.trim())          { setError('Please enter your message.'); return; }
+    if (body.trim().length<10) { setError('Message must be at least 10 characters.'); return; }
+    if (!adminId)              { setError('Could not reach support. Please email us directly at support@artisan.com'); return; }
 
     setSending(true);
     try {
       const orderRef    = selectedOrder ? `\n\nOrder Reference: #${selectedOrder.order_number}` : '';
       const fullMessage = `[${subject}]${orderRef}\n\n${body.trim()}`;
-      const res  = await fetch(`${API_BASE_URL}/messages`, {
+      const res = await fetch(`${API_BASE_URL}/messages`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           sender_id:   userId,
           receiver_id: adminId,
           message:     fullMessage,
-          order_id:    selectedOrder ? parseInt(selectedOrder.id) : null,
+          order_id:    selectedOrder ? selectedOrder.id : null,
         }),
       });
       const data = await res.json();
@@ -116,8 +270,7 @@ const ContactSupportModal = ({ userId, adminId, adminLoading, selectedOrder, onC
               <h2 className="font-bold text-lg">Contact Support</h2>
               {selectedOrder
                 ? <p className="text-violet-200 text-xs">Regarding Order #{selectedOrder.order_number}</p>
-                : <p className="text-violet-200 text-xs">We typically reply within 24 hours</p>
-              }
+                : <p className="text-violet-200 text-xs">We typically reply within 24 hours</p>}
             </div>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white hover:bg-white/20 rounded-lg p-1.5 transition">
@@ -181,8 +334,7 @@ const ContactSupportModal = ({ userId, adminId, adminLoading, selectedOrder, onC
               ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Connecting...</>
               : sending
               ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Sending...</>
-              : <><Send className="w-4 h-4"/>Send to Support</>
-            }
+              : <><Send className="w-4 h-4"/>Send to Support</>}
           </button>
         </div>
       </div>
@@ -192,10 +344,6 @@ const ContactSupportModal = ({ userId, adminId, adminLoading, selectedOrder, onC
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REFUND POLICY HELPERS
-// Rules:
-//   Cancelled + paid online (GCash/PayPal) → 24 hours from cancellation time
-//   Delivered → 1–3 days (72 hours) from delivery/status change time
-//   Expired deadline → show "Cannot refund due to refund policy rules"
 // ─────────────────────────────────────────────────────────────────────────────
 
 const getRefundStatus = (order) => {
@@ -205,22 +353,10 @@ const getRefundStatus = (order) => {
   const method  = order.payment_method?.toLowerCase();
   const payment = order.payment_status?.toLowerCase();
 
-  // COD cancelled — no online payment, no refund needed
-  if (status === 'cancelled' && method === 'cod') {
-    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
-  }
+  if (status === 'cancelled' && method === 'cod') return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+  if (status !== 'delivered' && status !== 'cancelled') return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
+  if (status === 'cancelled' && payment !== 'paid') return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
 
-  // Not in a refundable state
-  if (status !== 'delivered' && status !== 'cancelled') {
-    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
-  }
-
-  // Cancelled + not paid online
-  if (status === 'cancelled' && payment !== 'paid') {
-    return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
-  }
-
-  // Check deadline from order (set by backend on cancel/delivery)
   const deadlineStr = order.refund_deadline;
   const now = new Date();
 
@@ -231,46 +367,21 @@ const getRefundStatus = (order) => {
     const expired   = msLeft <= 0;
 
     if (status === 'cancelled') {
-      return {
-        canRefund:  !expired,
-        expired,
-        deadline,
-        hoursLeft,
-        label: expired
-          ? 'Refund request expired'
-          : `Request refund · ${hoursLeft}h left`,
-        type: 'cancellation',
-      };
+      return { canRefund: !expired, expired, deadline, hoursLeft, label: expired ? 'Refund request expired' : `Request refund · ${hoursLeft}h left`, type: 'cancellation' };
     }
-
     if (status === 'delivered') {
       const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
-      return {
-        canRefund:  !expired,
-        expired,
-        deadline,
-        hoursLeft,
-        daysLeft,
-        label: expired
-          ? 'Refund request expired'
-          : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`,
-        type: 'delivery',
-      };
+      return { canRefund: !expired, expired, deadline, hoursLeft, daysLeft, label: expired ? 'Refund request expired' : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`, type: 'delivery' };
     }
   }
 
-  // Fallback: deadline not set yet (old orders) — use order_date estimates
   if (status === 'cancelled' && (method === 'gcash' || method === 'paypal') && payment === 'paid') {
     const cancelledAt = order.cancelled_at ? new Date(order.cancelled_at) : new Date(order.updated_at || order.order_date);
     const deadline    = new Date(cancelledAt.getTime() + 24 * 60 * 60 * 1000);
     const msLeft      = deadline - now;
     const hoursLeft   = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60)));
     const expired     = msLeft <= 0;
-    return {
-      canRefund: !expired, expired, deadline, hoursLeft,
-      label: expired ? 'Refund request expired' : `Request refund · ${hoursLeft}h left`,
-      type: 'cancellation',
-    };
+    return { canRefund: !expired, expired, deadline, hoursLeft, label: expired ? 'Refund request expired' : `Request refund · ${hoursLeft}h left`, type: 'cancellation' };
   }
 
   if (status === 'delivered') {
@@ -280,41 +391,29 @@ const getRefundStatus = (order) => {
     const daysLeft  = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
     const hoursLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60)));
     const expired   = msLeft <= 0;
-    return {
-      canRefund: !expired, expired, deadline, hoursLeft, daysLeft,
-      label: expired ? 'Refund request expired' : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`,
-      type: 'delivery',
-    };
+    return { canRefund: !expired, expired, deadline, hoursLeft, daysLeft, label: expired ? 'Refund request expired' : `Request refund · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`, type: 'delivery' };
   }
 
   return { canRefund: false, expired: false, deadline: null, hoursLeft: null, label: null };
 };
 
-const canRequestRefund = (order) => {
-  const { canRefund, expired } = getRefundStatus(order);
-  return canRefund || expired; // show button for both — expired shows disabled state
-};
-
+const canRequestRefund  = (order) => { const { canRefund, expired } = getRefundStatus(order); return canRefund || expired; };
 const refundButtonLabel = (order) => {
-  const { label, expired, type } = getRefundStatus(order);
+  const { label, expired } = getRefundStatus(order);
   if (expired) return 'Refund Unavailable';
-  if (label) return label;
+  if (label)   return label;
   const status = order.order_status?.toLowerCase();
   if (status === 'cancelled') return 'Request Refund for Cancelled Order';
   return 'Request Refund';
 };
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CANCEL CONFIRMATION MODAL
-// Shows suspension warning so buyer knows the consequence before confirming
 // ─────────────────────────────────────────────────────────────────────────────
+
 const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) => {
-  // Will this cancellation hit the limit and trigger suspension?
-  const willTriggerSuspension = suspension && !suspension.suspended &&
-    (suspension.current_count || 0) + 1 >= suspension.limit;
-  // Is buyer already 1 away (showing last warning)?
-  const isLastWarning = suspension && !suspension.suspended && suspension.warning;
+  const willTriggerSuspension = suspension && !suspension.suspended && (suspension.current_count || 0) + 1 >= suspension.limit;
+  const isLastWarning         = suspension && !suspension.suspended && suspension.warning;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -330,7 +429,6 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Order summary */}
           <div className="bg-gray-50 rounded-xl p-4 text-sm">
             <p className="text-gray-600">
               {order.order_items?.length || 0} item{(order.order_items?.length || 0) !== 1 ? 's' : ''} ·{' '}
@@ -339,7 +437,6 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
             </p>
           </div>
 
-          {/* Will trigger suspension warning */}
           {willTriggerSuspension && (
             <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
               <div className="flex items-start gap-2.5">
@@ -350,30 +447,24 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
                     Cancelling will reach the limit of <strong>{suspension.limit} cancellations in 7 days</strong>.
                     Your checkout will be suspended for <strong>2 days</strong>.
                   </p>
-                  <p className="text-xs text-red-500 mt-2">
-                    You can still browse, add to cart, message sellers and view orders during suspension.
-                  </p>
+                  <p className="text-xs text-red-500 mt-2">You can still browse, add to cart, message sellers and view orders during suspension.</p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Last warning — 1 away */}
           {isLastWarning && !willTriggerSuspension && (
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
               <div className="flex items-start gap-2.5">
                 <span className="text-xl flex-shrink-0">⚠️</span>
                 <div>
                   <p className="font-bold text-orange-800 text-sm">Warning — 1 more cancellation after this</p>
-                  <p className="text-xs text-orange-700 mt-1">
-                    After this, 1 more cancellation this week will suspend checkout for 2 days.
-                  </p>
+                  <p className="text-xs text-orange-700 mt-1">After this, 1 more cancellation this week will suspend checkout for 2 days.</p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Refund notice for paid online orders */}
           {order.payment_status === 'paid' && (order.payment_method === 'gcash' || order.payment_method === 'paypal') && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2.5">
               <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -400,8 +491,7 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
             {loading
               ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Cancelling...</>
               : willTriggerSuspension ? '🚫 Cancel & Accept Suspension'
-              : 'Yes, Cancel Order'
-            }
+              : 'Yes, Cancel Order'}
           </button>
         </div>
       </div>
@@ -415,35 +505,31 @@ const CancelConfirmModal = ({ order, suspension, onConfirm, onClose, loading }) 
 
 const OrdersPage = ({ userId }) => {
   const navigate = useNavigate();
+  const { toasts, addToast, removeToast } = useToast();
+
   const [orders,         setOrders]         = useState([]);
   const [selectedOrder,  setSelectedOrder]  = useState(null);
   const [loading,        setLoading]        = useState(true);
   const [error,          setError]          = useState(null);
   const [selectedStatus, setSelectedStatus] = useState('all');
 
-  // Message Seller modal
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageText,      setMessageText]      = useState('');
   const [sendingMessage,   setSendingMessage]   = useState(false);
   const [messageError,     setMessageError]     = useState('');
 
-  // Contact Support modal
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [adminId,          setAdminId]          = useState(null);
   const [adminLoading,     setAdminLoading]     = useState(true);
 
-  // Refund modal
-  const [showRefundModal,  setShowRefundModal]  = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
 
-  // Cancel confirm modal with suspension awareness
-  const [showCancelModal,  setShowCancelModal]  = useState(false);
-  const [cancellingOrder,  setCancellingOrder]  = useState(null);
-  const [cancelLoading,    setCancelLoading]    = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancellingOrder, setCancellingOrder] = useState(null);
+  const [cancelLoading,   setCancelLoading]   = useState(false);
 
-  // Suspension state — fetched on mount and after each cancellation
-  const [suspension,       setSuspension]       = useState(null);
+  const [suspension, setSuspension] = useState(null);
 
-  // Review modal
   const [showReviewModal,  setShowReviewModal]  = useState(false);
   const [selectedProduct,  setSelectedProduct]  = useState(null);
   const [rating,           setRating]           = useState(0);
@@ -452,7 +538,12 @@ const OrdersPage = ({ userId }) => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewError,      setReviewError]      = useState('');
   const [existingReviews,  setExistingReviews]  = useState({});
-  const [refundMap,        setRefundMap]         = useState({}); // order_id → refund request
+  const [refundMap,        setRefundMap]        = useState({});
+
+  // InfoDialog state
+  const [dialog, setDialog] = useState(null);
+  const showDialog = useCallback((opts) => setDialog(opts), []);
+  const closeDialog = useCallback(() => setDialog(null), []);
 
   const currentUserId = userId || JSON.parse(localStorage.getItem('user') || '{}').id;
 
@@ -463,7 +554,6 @@ const OrdersPage = ({ userId }) => {
     fetchSuspension();
   }, [currentUserId, selectedStatus]);
 
-  // ── Fetch suspension status ───────────────────────────────────────────────
   const fetchSuspension = async () => {
     if (!currentUserId) return;
     try {
@@ -490,12 +580,11 @@ const OrdersPage = ({ userId }) => {
       const res  = await fetch(`${API_BASE_URL}/orders/user/${currentUserId}${statusParam}`);
       if (!res.ok) throw new Error('Failed to fetch orders');
       const data = await res.json();
-      const orders = data.orders || [];
-      setOrders(orders);
-      if (orders.length > 0 && !selectedOrder) setSelectedOrder(orders[0]);
-      await fetchExistingReviews(orders);
-      // Fetch refund status for all orders so we can show "Refunded" badge
-      await fetchRefundStatuses(orders);
+      const fetchedOrders = data.orders || [];
+      setOrders(fetchedOrders);
+      if (fetchedOrders.length > 0 && !selectedOrder) setSelectedOrder(fetchedOrders[0]);
+      await fetchExistingReviews(fetchedOrders);
+      await fetchRefundStatuses(fetchedOrders);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };
@@ -525,14 +614,12 @@ const OrdersPage = ({ userId }) => {
   const fetchRefundStatuses = async (ordersList) => {
     try {
       const map = {};
-      // Fetch refund requests for orders that are eligible
       const eligibleIds = ordersList
         .filter(o => {
           const s = o.order_status?.toLowerCase();
           const m = o.payment_method?.toLowerCase();
           const p = o.payment_status?.toLowerCase();
-          return s === 'delivered' ||
-            (s === 'cancelled' && p === 'paid' && (m === 'gcash' || m === 'paypal'));
+          return s === 'delivered' || (s === 'cancelled' && p === 'paid' && (m === 'gcash' || m === 'paypal'));
         })
         .map(o => o.id);
 
@@ -561,9 +648,9 @@ const OrdersPage = ({ userId }) => {
 
   const handleSubmitReview = async () => {
     setReviewError('');
-    if (rating === 0)                      { setReviewError('Please select a rating'); return; }
-    if (!reviewComment.trim())             { setReviewError('Please write a comment'); return; }
-    if (reviewComment.trim().length < 10)  { setReviewError('Comment must be at least 10 characters long'); return; }
+    if (rating === 0)                     { setReviewError('Please select a rating'); return; }
+    if (!reviewComment.trim())            { setReviewError('Please write a comment'); return; }
+    if (reviewComment.trim().length < 10) { setReviewError('Comment must be at least 10 characters long'); return; }
 
     setSubmittingReview(true);
     try {
@@ -576,12 +663,16 @@ const OrdersPage = ({ userId }) => {
           })
         : await fetch(`${API_BASE_URL}/feedback`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ product_id: parseInt(productId), user_id: currentUserId, rating, comment: reviewComment.trim() })
+            body: JSON.stringify({ product_id: productId, user_id: currentUserId, rating, comment: reviewComment.trim() })
           });
 
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to submit review'); }
-      alert(existingReview ? '✅ Review updated successfully!' : '✅ Review submitted successfully!');
-      setShowReviewModal(false); setSelectedProduct(null); setRating(0); setReviewComment('');
+
+      setShowReviewModal(false);
+      setSelectedProduct(null);
+      setRating(0);
+      setReviewComment('');
+      addToast(existingReview ? 'Review updated successfully!' : 'Review submitted successfully!', 'success');
       await fetchOrders();
     } catch (err) { setReviewError(err.message); }
     finally { setSubmittingReview(false); }
@@ -589,38 +680,39 @@ const OrdersPage = ({ userId }) => {
 
   const handleSendMessage = async () => {
     setMessageError('');
-    if (!messageText.trim())                { setMessageError('Please enter a message'); return; }
-    if (!selectedOrder?.order_items?.length){ setMessageError('No order items found'); return; }
+    if (!messageText.trim())                 { setMessageError('Please enter a message'); return; }
+    if (!selectedOrder?.order_items?.length) { setMessageError('No order items found'); return; }
+
     const firstItem = selectedOrder.order_items[0];
     const sellerId  = firstItem.product?.user_id;
     if (!sellerId) { setMessageError('Seller information not available'); return; }
+
     const buyerId = JSON.parse(localStorage.getItem('user') || '{}').id;
-    if (!buyerId)  { setMessageError('You must be logged in to send messages'); return; }
+    if (!buyerId) { setMessageError('You must be logged in to send messages'); return; }
 
     setSendingMessage(true);
     try {
-      const res  = await fetch(`${API_BASE_URL}/messages`, {
+      const res = await fetch(`${API_BASE_URL}/messages`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sender_id:   buyerId,
           receiver_id: sellerId,
           message:     messageText.trim(),
-          order_id:    parseInt(selectedOrder.id),
-          product_id:  parseInt(firstItem.product_id || firstItem.product?.id),
+          order_id:    selectedOrder.id,
+          product_id:  firstItem.product_id || firstItem.product?.id,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send message');
-      setMessageText(''); setShowMessageModal(false);
-      alert('✅ Message sent successfully!');
+      setMessageText('');
+      setShowMessageModal(false);
+      addToast('Message sent to seller!', 'success');
     } catch (err) { setMessageError(err.message); }
     finally { setSendingMessage(false); }
   };
 
-  const canMessageSeller = (order) =>
-    order && ['pending','processing','shipped','delivered'].includes(order.order_status?.toLowerCase());
-
-  const canReviewProduct = (order) => order?.order_status?.toLowerCase() === 'delivered';
+  const canMessageSeller  = (order) => order && ['pending','processing','shipped','delivered'].includes(order.order_status?.toLowerCase());
+  const canReviewProduct  = (order) => order?.order_status?.toLowerCase() === 'delivered';
 
   const getStatusColor = (status) => ({
     pending:    'bg-amber-100 text-amber-800 border-amber-200',
@@ -641,17 +733,11 @@ const OrdersPage = ({ userId }) => {
     }
   };
 
-  const getOrderProgress = (status) =>
-    ({ pending:25, processing:50, shipped:75, delivered:100, cancelled:0 }[status?.toLowerCase()] || 0);
+  const getOrderProgress  = (status) => ({ pending:25, processing:50, shipped:75, delivered:100, cancelled:0 }[status?.toLowerCase()] || 0);
+  const formatDate        = (d) => new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  const formatDateTime    = (d) => new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' });
 
-  const formatDate     = (d) => new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-  const formatDateTime = (d) => new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' });
-
-  // ── Cancel order — opens confirm modal with suspension warning ──────────────
-  const handleCancelOrder = (order) => {
-    setCancellingOrder(order);
-    setShowCancelModal(true);
-  };
+  const handleCancelOrder = (order) => { setCancellingOrder(order); setShowCancelModal(true); };
 
   const handleConfirmCancel = async () => {
     if (!cancellingOrder) return;
@@ -667,27 +753,29 @@ const OrdersPage = ({ userId }) => {
 
       setShowCancelModal(false);
       setCancellingOrder(null);
-
-      // Refresh orders + suspension status
       await fetchOrders();
       await fetchSuspension();
 
+      // Show refund notice via dialog instead of alert
       if (data?.refund_deadline && data?.refund_status !== 'No refund needed') {
-        const deadline = new Date(data.refund_deadline);
+        const deadline  = new Date(data.refund_deadline);
         const hoursLeft = Math.max(0, Math.ceil((deadline - new Date()) / (1000 * 60 * 60)));
-        alert(
-          `✅ Order cancelled.\n\n` +
-          `⏰ REFUND POLICY NOTICE:\n` +
-          `Since you paid via ${cancellingOrder?.payment_method?.toUpperCase()}, you have ` +
-          `${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''} to request a refund.\n\n` +
-          `Deadline: ${deadline.toLocaleString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}\n\n` +
-          `After this deadline, refunds will no longer be accepted per our refund policy.`
-        );
+        const method    = cancellingOrder?.payment_method?.toUpperCase();
+        showDialog({
+          title:        'Order Cancelled',
+          icon:         '⏰',
+          success:      false,
+          body:
+            `Since you paid via ${method}, you have ${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''} to request a refund.\n\n` +
+            `Deadline: ${deadline.toLocaleString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}\n\n` +
+            `After this deadline, refunds will no longer be accepted per our refund policy.`,
+          confirmLabel: 'I Understand',
+        });
       } else {
-        alert('✅ Order cancelled successfully.');
+        addToast('Order cancelled successfully.', 'success');
       }
     } catch (err) {
-      alert('Error canceling order: ' + err.message);
+      addToast('Error cancelling order: ' + err.message, 'error');
     } finally {
       setCancelLoading(false);
     }
@@ -715,9 +803,12 @@ const OrdersPage = ({ userId }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-indigo-50/30">
+
+      <Toast toasts={toasts} removeToast={removeToast} />
+      <InfoDialog dialog={dialog} onClose={closeDialog} />
+
       <div className="max-w-7xl mx-auto px-4 py-8">
 
-        {/* ── Suspension banners — checkout blocked, all other activities normal ── */}
         {suspension?.suspended && (
           <div className="bg-red-50 border-2 border-red-200 rounded-2xl px-5 py-4 mb-6 flex items-start gap-3">
             <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -735,6 +826,7 @@ const OrdersPage = ({ userId }) => {
             </div>
           </div>
         )}
+
         {!suspension?.suspended && suspension?.warning && (
           <div className="bg-orange-50 border border-orange-300 rounded-2xl px-5 py-3 mb-6 flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0"/>
@@ -812,45 +904,28 @@ const OrdersPage = ({ userId }) => {
                         <p className="text-sm text-gray-500">Total</p>
                         <p className="font-bold text-gray-900">₱{parseFloat(order.total_amount).toFixed(2)}</p>
                       </div>
-                      <div className="mb-2"><DeliveryPill city={order.shipping_city} orderDate={order.order_date}/></div>
+                      <div className="mb-2">
+                        <DeliveryPill city={order.shipping_city} province={order.shipping_province} orderDate={order.order_date}/>
+                      </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(order.order_status)}`}>
                           {getStatusIcon(order.order_status)}
                           {order.order_status.charAt(0).toUpperCase() + order.order_status.slice(1)}
                         </span>
-                        {/* Refund eligible indicator in list */}
                         {(() => {
                           const ri     = getRefundStatus(order);
                           const refund = refundMap[order.id];
-
-                          // Already has a refund request — show its status
                           if (refund) {
-                            if (refund.status === 'approved') return (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                ↩ Refunded
-                              </span>
-                            );
-                            if (refund.status === 'pending' || refund.status === 'seller_pending') return (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                ⏳ Refund Pending
-                              </span>
-                            );
-                            if (refund.status === 'rejected') return (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                                ✗ Refund Rejected
-                              </span>
-                            );
+                            if (refund.status === 'approved') return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">↩ Refunded</span>;
+                            if (refund.status === 'pending' || refund.status === 'seller_pending') return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">⏳ Refund Pending</span>;
+                            if (refund.status === 'rejected') return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">✗ Refund Rejected</span>;
                           }
-
-                          // No refund yet — show eligibility
                           if (!ri.canRefund && !ri.expired) return null;
                           return (
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              ri.expired
-                                ? 'bg-gray-100 text-gray-400'
-                                : ri.hoursLeft <= 6
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-orange-100 text-orange-700'
+                              ri.expired ? 'bg-gray-100 text-gray-400'
+                              : ri.hoursLeft <= 6 ? 'bg-red-100 text-red-700'
+                              : 'bg-orange-100 text-orange-700'
                             }`}>
                               {ri.expired ? 'Refund expired' : ri.type === 'cancellation' ? `Refund · ${ri.hoursLeft}h` : `Refund · ${ri.daysLeft}d`}
                             </span>
@@ -868,7 +943,6 @@ const OrdersPage = ({ userId }) => {
               {selectedOrder ? (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-                  {/* Order Header */}
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-gray-100">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -881,18 +955,17 @@ const OrdersPage = ({ userId }) => {
                       </span>
                     </div>
 
-                    {/* Progress bar — only for active orders */}
                     {selectedOrder.order_status !== 'cancelled' && (
                       <div className="relative mt-6">
                         <div className="flex justify-between mb-3">
                           {[
-                            { status:'pending',    icon:Clock,        label:'Pending'    },
-                            { status:'processing', icon:Package,      label:'Processing' },
-                            { status:'shipped',    icon:Truck,        label:'Shipped'    },
-                            { status:'delivered',  icon:CheckCircle,  label:'Delivered'  },
+                            { status:'pending',    icon:Clock,       label:'Pending'    },
+                            { status:'processing', icon:Package,     label:'Processing' },
+                            { status:'shipped',    icon:Truck,       label:'Shipped'    },
+                            { status:'delivered',  icon:CheckCircle, label:'Delivered'  },
                           ].map(({ status, icon: Icon, label }) => {
-                            const steps     = ['pending','processing','shipped','delivered'];
-                            const isActive  = steps.indexOf(selectedOrder.order_status) >= steps.indexOf(status);
+                            const steps    = ['pending','processing','shipped','delivered'];
+                            const isActive = steps.indexOf(selectedOrder.order_status) >= steps.indexOf(status);
                             const isCurrent = selectedOrder.order_status === status;
                             return (
                               <div key={status} className="flex flex-col items-center flex-1">
@@ -909,13 +982,11 @@ const OrdersPage = ({ userId }) => {
                           })}
                         </div>
                         <div className="absolute top-5 left-0 w-full h-0.5 bg-gray-200 -z-10" style={{marginLeft:'20px',width:'calc(100% - 40px)'}}>
-                          <div className="h-full bg-blue-600 transition-all duration-500"
-                            style={{width:`${getOrderProgress(selectedOrder.order_status)}%`}}/>
+                          <div className="h-full bg-blue-600 transition-all duration-500" style={{width:`${getOrderProgress(selectedOrder.order_status)}%`}}/>
                         </div>
                       </div>
                     )}
 
-                    {/* Cancelled notice */}
                     {selectedOrder.order_status === 'cancelled' && (
                       <div className="mt-4 space-y-2">
                         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
@@ -934,19 +1005,14 @@ const OrdersPage = ({ userId }) => {
                             </p>
                           )}
                         </div>
-                        {/* ── 24h refund urgency notice ── */}
                         {selectedOrder.payment_status === 'paid' &&
                          (selectedOrder.payment_method === 'gcash' || selectedOrder.payment_method === 'paypal') && (() => {
                           const refundInfo = getRefundStatus(selectedOrder);
-                          if (refundInfo.expired) return null; // expired notice shown in button area
-                          if (!refundInfo.hoursLeft) return null;
+                          if (refundInfo.expired || !refundInfo.hoursLeft) return null;
                           const isUrgent = refundInfo.hoursLeft <= 6;
                           return (
-                            <div className={`rounded-xl p-4 flex items-start gap-3 border-2 ${
-                              isUrgent ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'
-                            }`}>
-                              <svg className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div className={`rounded-xl p-4 flex items-start gap-3 border-2 ${isUrgent ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}>
+                              <svg className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isUrgent ? 'text-red-600' : 'text-amber-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                               </svg>
                               <div>
@@ -956,7 +1022,6 @@ const OrdersPage = ({ userId }) => {
                                 <p className={`text-xs mt-0.5 ${isUrgent ? 'text-red-700' : 'text-amber-700'}`}>
                                   You have <strong>{refundInfo.hoursLeft} hour{refundInfo.hoursLeft !== 1 ? 's' : ''}</strong> to request a refund for this{' '}
                                   {selectedOrder.payment_method.toUpperCase()} payment.
-                                  After that, refunds will no longer be accepted per our refund policy.
                                 </p>
                                 <p className={`text-xs mt-1 font-medium ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}>
                                   Deadline: {refundInfo.deadline?.toLocaleString('en-PH', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
@@ -969,20 +1034,21 @@ const OrdersPage = ({ userId }) => {
                     )}
                   </div>
 
-                  {/* Order Body */}
                   <div className="p-6 space-y-6">
 
-                    {/* Delivery estimate — only for non-cancelled */}
                     {selectedOrder.order_status !== 'cancelled' && (
                       <div>
                         <h3 className="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
                           <Truck className="w-5 h-5 text-blue-600"/>Estimated Delivery
                         </h3>
-                        <DeliveryBanner city={selectedOrder.shipping_city} orderDate={selectedOrder.order_date}/>
+                        <DeliveryBanner
+                          city={selectedOrder.shipping_city}
+                          province={selectedOrder.shipping_province}
+                          orderDate={selectedOrder.order_date}
+                        />
                       </div>
                     )}
 
-                    {/* Date + Tracking */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="bg-gray-50 rounded-xl p-4">
                         <div className="flex items-center gap-3">
@@ -1002,7 +1068,7 @@ const OrdersPage = ({ userId }) => {
                               <MapPin className="w-5 h-5 text-white"/>
                             </div>
                             <div>
-                              <p className="text-sm text-gray-600 font-medium">Tracking Number</p>
+                              <p className="text-sm text-gray-600 font-medium">LBC Tracking Number</p>
                               <p className="font-bold text-gray-900 font-mono">{selectedOrder.tracking_number}</p>
                             </div>
                           </div>
@@ -1010,7 +1076,6 @@ const OrdersPage = ({ userId }) => {
                       )}
                     </div>
 
-                    {/* Address */}
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
                         <MapPin className="w-5 h-5 text-blue-600"/>Delivery Address
@@ -1028,23 +1093,21 @@ const OrdersPage = ({ userId }) => {
                       </div>
                     </div>
 
-                    {/* Items */}
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
                         <Package className="w-5 h-5 text-blue-600"/>Ordered Items
                       </h3>
                       <div className="space-y-3">
                         {selectedOrder.order_items?.map((item, index) => {
-                          const productId  = item.product_id || item.product?.id;
-                          const hasReview  = existingReviews[productId];
+                          const productId = item.product_id || item.product?.id;
+                          const hasReview = existingReviews[productId];
                           return (
                             <div key={index} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition">
                               <div className="flex gap-4">
                                 <div className="w-20 h-20 bg-white rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
                                   {item.product?.product_image
                                     ? <img src={item.product.product_image} alt={item.product_name} className="w-full h-full object-cover"/>
-                                    : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package className="w-8 h-8"/></div>
-                                  }
+                                    : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package className="w-8 h-8"/></div>}
                                 </div>
                                 <div className="flex-1">
                                   <h4 className="font-semibold text-gray-900 mb-1">{item.product_name}</h4>
@@ -1064,7 +1127,10 @@ const OrdersPage = ({ userId }) => {
                                   {canReviewProduct(selectedOrder) && (
                                     <div className="mt-3">
                                       <button onClick={() => handleOpenReviewModal(item.product, item)}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition ${hasReview?'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100':'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}`}>
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition ${
+                                          hasReview ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                                          : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+                                        }`}>
                                         <Star className="w-4 h-4"/>
                                         {hasReview ? 'Edit Review' : 'Write Review'}
                                       </button>
@@ -1078,7 +1144,6 @@ const OrdersPage = ({ userId }) => {
                       </div>
                     </div>
 
-                    {/* Cost Summary */}
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
                         <span className="text-blue-600 font-bold text-lg">₱</span>Order Summary
@@ -1113,10 +1178,8 @@ const OrdersPage = ({ userId }) => {
                       </div>
                     </div>
 
-                    {/* ── Action Buttons ── */}
+                    {/* Action Buttons */}
                     <div className="space-y-3 pt-2">
-
-                      {/* Message Seller + Cancel — active orders */}
                       <div className="flex gap-3">
                         {canMessageSeller(selectedOrder) && (
                           <button onClick={() => setShowMessageModal(true)}
@@ -1132,22 +1195,13 @@ const OrdersPage = ({ userId }) => {
                         )}
                       </div>
 
-                      {/* ── Refund Request Button ──────────────────────────────
-                          Shows for:
-                          • delivered orders within 3 days
-                          • cancelled GCash/PayPal orders within 24 hours
-                          Expired → shows disabled "Cannot refund" message
-                      ─────────────────────────────────────────────────────── */}
                       {canRequestRefund(selectedOrder) && (() => {
                         const refundInfo = getRefundStatus(selectedOrder);
                         const refund     = refundMap[selectedOrder.id];
 
-                        // ── Already has a refund request — show its status ────
                         if (refund?.status === 'approved') return (
                           <div className="w-full flex items-center gap-3 py-3 px-6 rounded-xl border-2 border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
-                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
-                            </svg>
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
                             <div>
                               <p>Refund Approved</p>
                               <p className="text-xs text-green-600 font-normal mt-0.5">₱{parseFloat(refund.refund_amount||0).toFixed(2)} has been refunded to your account</p>
@@ -1165,9 +1219,7 @@ const OrdersPage = ({ userId }) => {
                         );
                         if (refund?.status === 'rejected') return (
                           <div className="w-full flex items-center gap-3 py-3 px-6 rounded-xl border-2 border-red-200 bg-red-50 text-red-700 text-sm font-semibold">
-                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
                             <div>
                               <p>Refund Request Rejected</p>
                               {refund.admin_notes && <p className="text-xs text-red-600 font-normal mt-0.5">Reason: {refund.admin_notes}</p>}
@@ -1175,16 +1227,12 @@ const OrdersPage = ({ userId }) => {
                           </div>
                         );
 
-                        // ── No refund yet — show button or expired notice ─────
                         return (
                           <div>
-                            {/* Expired state */}
                             {refundInfo.expired ? (
                               <div className="w-full flex flex-col gap-2 py-3 px-6 rounded-xl border-2 border-gray-200 bg-gray-50">
                                 <div className="flex items-center justify-center gap-2 text-gray-400">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                  </svg>
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                   <span className="font-semibold text-sm">Cannot refund due to refund policy rules</span>
                                 </div>
                                 <p className="text-xs text-gray-400 text-center">
@@ -1194,32 +1242,20 @@ const OrdersPage = ({ userId }) => {
                                 </p>
                               </div>
                             ) : (
-                              /* Active refund button with countdown */
                               <div>
-                                <button
-                                  onClick={() => setShowRefundModal(true)}
+                                <button onClick={() => setShowRefundModal(true)}
                                   className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl border-2 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 transition font-semibold text-sm">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-                                  </svg>
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
                                   {refundButtonLabel(selectedOrder)}
                                 </button>
-                                {/* Policy countdown */}
-                                <div className={`mt-2 px-4 py-2 rounded-lg flex items-center gap-2 ${
-                                  refundInfo.hoursLeft <= 6 ? 'bg-red-50 border border-red-100' : 'bg-amber-50 border border-amber-100'
-                                }`}>
-                                  <svg className={`w-3.5 h-3.5 flex-shrink-0 ${refundInfo.hoursLeft <= 6 ? 'text-red-500' : 'text-amber-500'}`}
-                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <div className={`mt-2 px-4 py-2 rounded-lg flex items-center gap-2 ${refundInfo.hoursLeft <= 6 ? 'bg-red-50 border border-red-100' : 'bg-amber-50 border border-amber-100'}`}>
+                                  <svg className={`w-3.5 h-3.5 flex-shrink-0 ${refundInfo.hoursLeft <= 6 ? 'text-red-500' : 'text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                                   </svg>
                                   <p className={`text-xs font-medium ${refundInfo.hoursLeft <= 6 ? 'text-red-700' : 'text-amber-700'}`}>
-                                    {refundInfo.type === 'cancellation'
-                                      ? `Refund policy: submit within 24h of cancellation · `
-                                      : `Refund policy: submit within 3 days of delivery · `}
+                                    {refundInfo.type === 'cancellation' ? 'Refund policy: submit within 24h of cancellation · ' : 'Refund policy: submit within 3 days of delivery · '}
                                     <strong>
-                                      {refundInfo.type === 'delivery' && refundInfo.daysLeft > 1
-                                        ? `${refundInfo.daysLeft} days remaining`
-                                        : `${refundInfo.hoursLeft}h remaining`}
+                                      {refundInfo.type === 'delivery' && refundInfo.daysLeft > 1 ? `${refundInfo.daysLeft} days remaining` : `${refundInfo.hoursLeft}h remaining`}
                                     </strong>
                                   </p>
                                 </div>
@@ -1229,7 +1265,6 @@ const OrdersPage = ({ userId }) => {
                         );
                       })()}
 
-                      {/* Contact Support — active orders */}
                       {canMessageSeller(selectedOrder) && (
                         <button onClick={() => setShowSupportModal(true)}
                           className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl border-2 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:border-violet-300 transition font-semibold text-sm">
@@ -1251,7 +1286,7 @@ const OrdersPage = ({ userId }) => {
         )}
       </div>
 
-      {/* ── Cancel Confirm Modal ── */}
+      {/* Cancel Confirm Modal */}
       {showCancelModal && cancellingOrder && (
         <CancelConfirmModal
           order={cancellingOrder}
@@ -1262,7 +1297,7 @@ const OrdersPage = ({ userId }) => {
         />
       )}
 
-      {/* ── Message Seller Modal ── */}
+      {/* Message Seller Modal */}
       {showMessageModal && selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
@@ -1319,7 +1354,7 @@ const OrdersPage = ({ userId }) => {
         </div>
       )}
 
-      {/* ── Contact Support Modal ── */}
+      {/* Contact Support Modal */}
       {showSupportModal && (
         <ContactSupportModal
           userId={currentUserId}
@@ -1329,12 +1364,12 @@ const OrdersPage = ({ userId }) => {
           onClose={() => setShowSupportModal(false)}
           onSent={() => {
             setShowSupportModal(false);
-            alert('✅ Your message has been sent to our support team. We\'ll get back to you within 24 hours.');
+            addToast('Your message has been sent to our support team. We\'ll get back to you within 24 hours.', 'success', 6000);
           }}
         />
       )}
 
-      {/* ── Refund Request Modal ── */}
+      {/* Refund Request Modal */}
       {showRefundModal && selectedOrder && (
         <RefundRequestModal
           order={selectedOrder}
@@ -1344,7 +1379,7 @@ const OrdersPage = ({ userId }) => {
         />
       )}
 
-      {/* ── Review Modal ── */}
+      {/* Review Modal */}
       {showReviewModal && selectedProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
@@ -1352,7 +1387,9 @@ const OrdersPage = ({ userId }) => {
               <div className="flex items-center gap-3">
                 <Star className="w-6 h-6"/>
                 <div>
-                  <h2 className="text-xl font-bold">{existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Edit Review' : 'Write Review'}</h2>
+                  <h2 className="text-xl font-bold">
+                    {existingReviews[selectedProduct.id || selectedProduct.orderItem.product_id] ? 'Edit Review' : 'Write Review'}
+                  </h2>
                   <p className="text-sm text-amber-100">Share your experience</p>
                 </div>
               </div>
@@ -1407,6 +1444,11 @@ const OrdersPage = ({ userId }) => {
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slideUp { animation: slideUp 0.25s ease-out; }
+      `}</style>
     </div>
   );
 };

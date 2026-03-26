@@ -4,7 +4,7 @@ import ReactDOM from "react-dom";
 const PSGC = "https://psgc.cloud/api";
 
 // ─── Field component (must stay outside AddressModal) ─────────────────────────
-const Field = ({ label, field, placeholder, half = false, value, onChange, error }) => (
+const Field = ({ label, field, placeholder, half = false, value, onChange, error, maxLength, inputMode, onKeyDown }) => (
   <div className={half ? "flex-1 min-w-0" : "w-full"}>
     <label className="block text-xs font-semibold text-[#5c5042] mb-1">{label}</label>
     <input
@@ -12,6 +12,9 @@ const Field = ({ label, field, placeholder, half = false, value, onChange, error
       placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(field, e.target.value)}
+      maxLength={maxLength}
+      inputMode={inputMode}
+      onKeyDown={onKeyDown}
       className={`w-full border rounded-lg px-3 py-2 text-sm outline-none transition
         focus:border-[#c08a4b] focus:ring-2 focus:ring-[#c08a4b]/20
         ${error ? "border-red-400 bg-red-50" : "border-gray-200 bg-gray-50 hover:border-gray-300"}`}
@@ -94,13 +97,12 @@ const AddressModal = ({ onClose, onSave, editAddress = null }) => {
       try {
         const res = await fetch(`${PSGC}/provinces`);
         const data = await res.json();
-        // Sort alphabetically
         const sorted = data
           .map((p) => ({ code: p.code, name: p.name }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setProvinces(sorted);
       } catch {
-        // silently fail — user can still type manually
+        // silently fail
       } finally {
         setLoadingProvinces(false);
       }
@@ -169,9 +171,6 @@ const AddressModal = ({ onClose, onSave, editAddress = null }) => {
         zip_code:   editAddress.zip_code   || "",
         is_default: editAddress.is_default || false,
       });
-      // Note: when editing, province/city/barangay show as plain text
-      // (matching stored names). Dropdowns start blank; user can re-pick
-      // if they want to change the address.
     }
   }, [editAddress]);
 
@@ -193,7 +192,6 @@ const AddressModal = ({ onClose, onSave, editAddress = null }) => {
   const handleBarangaySelect = (code) => {
     setSelectedBarangay(code);
     const found = barangays.find((b) => b.code === code);
-    // Append barangay to street field for convenience
     if (found) {
       setForm((f) => ({
         ...f,
@@ -220,6 +218,44 @@ const AddressModal = ({ onClose, onSave, editAddress = null }) => {
   const handleChange = (field, value) => {
     setForm((p) => ({ ...p, [field]: value }));
     if (errors[field]) setErrors((p) => ({ ...p, [field]: undefined }));
+  };
+
+  // ✅ FIX: Phone handler — strip non-digits, enforce "09" prefix, cap at 11 digits
+  const handlePhoneChange = (field, value) => {
+    let digitsOnly = value.replace(/\D/g, "").slice(0, 11);
+
+    // Auto-prefix: if user types a digit that doesn't start with 0, prepend "09"
+    if (digitsOnly.length === 1 && digitsOnly !== "0") {
+      digitsOnly = "09" + digitsOnly;
+    }
+    // If first char is 0 but second isn't 9, force second char to 9
+    if (digitsOnly.length >= 2 && digitsOnly[0] === "0" && digitsOnly[1] !== "9") {
+      digitsOnly = "09" + digitsOnly.slice(2);
+    }
+
+    handleChange(field, digitsOnly.slice(0, 11));
+  };
+
+  // ✅ FIX: Block non-numeric keys; also block deleting the "09" prefix
+  const handlePhoneKeyDown = (e) => {
+    const allowedKeys = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"];
+    const isCtrlCmd   = e.ctrlKey || e.metaKey;
+
+    // Block non-digit, non-control keys
+    if (!isCtrlCmd && !allowedKeys.includes(e.key) && !/^\d$/.test(e.key)) {
+      e.preventDefault();
+      return;
+    }
+
+    // Prevent backspace/delete from removing the "09" prefix
+    const input = e.target;
+    const { selectionStart, selectionEnd } = input;
+    if (e.key === "Backspace" && selectionStart <= 2 && selectionEnd <= 2) {
+      e.preventDefault();
+    }
+    if (e.key === "Delete" && selectionStart < 2 && selectionEnd < 2) {
+      e.preventDefault();
+    }
   };
 
   const validate = () => {
@@ -313,8 +349,45 @@ const AddressModal = ({ onClose, onSave, editAddress = null }) => {
 
           {/* Name + Phone */}
           <div className="flex gap-3">
-            <Field label="Full Name *"    field="full_name" placeholder="Juan dela Cruz" half value={form.full_name} onChange={handleChange} error={errors.full_name} />
-            <Field label="Phone Number *" field="phone"     placeholder="09XX XXX XXXX"  half value={form.phone}     onChange={handleChange} error={errors.phone} />
+            <Field
+              label="Full Name *"
+              field="full_name"
+              placeholder="Juan dela Cruz"
+              half
+              value={form.full_name}
+              onChange={handleChange}
+              error={errors.full_name}
+            />
+            {/* ✅ FIX: Phone field — numeric only, maxLength 11, shows digit counter */}
+            <div className="flex-1 min-w-0">
+              <label className="block text-xs font-semibold text-[#5c5042] mb-1">
+                Phone Number *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="09XX XXX XXXX"
+                  value={form.phone}
+                  onChange={(e) => handlePhoneChange("phone", e.target.value)}
+                  onKeyDown={handlePhoneKeyDown}
+                  onFocus={() => {
+                    // Auto-insert "09" prefix when user focuses empty field
+                    if (!form.phone) handleChange("phone", "09");
+                  }}
+                  maxLength={11}
+                  inputMode="numeric"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm outline-none transition pr-12
+                    focus:border-[#c08a4b] focus:ring-2 focus:ring-[#c08a4b]/20
+                    ${errors.phone ? "border-red-400 bg-red-50" : "border-gray-200 bg-gray-50 hover:border-gray-300"}`}
+                />
+                {/* ✅ Live digit counter badge */}
+                <span className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums pointer-events-none
+                  ${form.phone.length === 11 ? "text-green-500" : "text-gray-400"}`}>
+                  {form.phone.length}/11
+                </span>
+              </div>
+              {errors.phone && <FieldError msg={errors.phone} />}
+            </div>
           </div>
 
           {/* ── PSGC Cascading Dropdowns ──────────────────────────────── */}

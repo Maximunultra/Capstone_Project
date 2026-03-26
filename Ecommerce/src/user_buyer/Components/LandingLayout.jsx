@@ -4,7 +4,9 @@ import ReactDOM from "react-dom";
 import AddressModal from "../Components/AddressModal";
 import useAddresses from "../../hooks/useAddresses";
 
-const API_BASE_URL = "https://capstone-project-1msq.onrender.com/api";
+// const API_BASE_URL = 'http://localhost:5000/api';
+// const API_BASE_URL = "https://capstone-project-1msq.onrender.com/api";
+const API_BASE_URL = "https://capstone-project-1-shnf.onrender.com/api";
 
 // ─── Shared address list content (desktop dropdown + mobile sheet both use this)
 const AddressPanel = ({ userId, onClose }) => {
