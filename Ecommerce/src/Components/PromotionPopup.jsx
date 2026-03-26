@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 // ⚙️ CONFIGURATION - Change these for testing
 const SHOW_DELAY_MS = 2000; // Show popup after 2 seconds
@@ -22,10 +23,10 @@ const PromotionPopup = () => {
     // Check if user has seen promotions recently
     const lastSeen = localStorage.getItem('promotions_last_seen');
     const now = Date.now();
-    
+
     // Convert cooldown minutes to milliseconds
     const cooldownMs = COOLDOWN_MINUTES * 60 * 1000;
-    
+
     // Show promotions if not seen within cooldown period
     if (!lastSeen || (now - parseInt(lastSeen)) > cooldownMs) {
       if (activePromotions.length > 0) {
@@ -40,21 +41,21 @@ const PromotionPopup = () => {
   }, [activePromotions]);
 
   const fetchActivePromotions = async () => {
-  try {
-    console.log('🔍 Fetching active promotions...');
-    const response = await fetch(`${API_BASE_URL}/promotions/active`);
-    if (!response.ok) throw new Error('Failed to fetch promotions');
- 
-    const data = await response.json();
-    console.log(`✅ ${data.promotions?.length || 0} active promotions found`);
- 
-    // Backend already filters by status=approved AND start_date<=now AND end_date>=now
-    // Just set whatever comes back — no need to re-filter in JS
-    setActivePromotions(data.promotions || []);
-  } catch (error) {
-    console.error('❌ Error fetching active promotions:', error);
-  }
-};
+    try {
+      console.log('🔍 Fetching active promotions...');
+      const response = await fetch(`${API_BASE_URL}/promotions/active`);
+      if (!response.ok) throw new Error('Failed to fetch promotions');
+
+      const data = await response.json();
+      console.log(`✅ ${data.promotions?.length || 0} active promotions found`);
+
+      // Backend already filters by status=approved AND start_date<=now AND end_date>=now
+      // Just set whatever comes back — no need to re-filter in JS
+      setActivePromotions(data.promotions || []);
+    } catch (error) {
+      console.error('❌ Error fetching active promotions:', error);
+    }
+  };
 
   const handleClose = () => {
     setIsVisible(false);
@@ -72,6 +73,7 @@ const PromotionPopup = () => {
 
   const handleViewProduct = () => {
     const promotion = activePromotions[currentIndex];
+    // ✅ FIX: product_id is a UUID string — no parseInt(), use as-is
     if (promotion && promotion.product_id) {
       handleClose();
       navigate(`/buyer/products/${promotion.product_id}`);
@@ -101,26 +103,26 @@ const PromotionPopup = () => {
   return (
     <>
       {/* Backdrop - Fixed positioning with fade animation */}
-      <div 
+      <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 animate-fadeIn"
         onClick={handleClose}
         aria-hidden="true"
       />
 
-      {/* 
+      {/*
         Popup Modal Container
         - Mobile: Full screen with padding for safe areas
         - Tablet+: Centered with max width
         - Prevents overflow with overflow-y-auto
       */}
       <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-0 sm:p-4 md:p-6 pointer-events-none overflow-y-auto">
-        <div 
+        <div
           className="bg-white w-full h-full sm:h-auto sm:rounded-2xl shadow-2xl sm:max-w-5xl sm:w-full max-h-screen sm:max-h-[95vh] overflow-y-auto pointer-events-auto animate-slideUp"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
         >
-          {/* 
+          {/*
             Close Button
             - Mobile: Top-right with safe padding
             - Tablet+: Absolute positioning
@@ -136,21 +138,21 @@ const PromotionPopup = () => {
             </svg>
           </button>
 
-          {/* 
+          {/*
             Main Content Grid
             - Mobile: Single column (stack vertically)
             - Tablet+: Two columns side by side
           */}
           <div className="grid grid-cols-1 lg:grid-cols-2 min-h-full sm:min-h-0">
-            
-            {/* 
+
+            {/*
               Left Section: Image/Visual Content
               - Mobile: Smaller height, centered
               - Tablet: Medium height
               - Desktop: Full height with gradient
             */}
             <div className="relative bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 p-6 sm:p-8 md:p-10 lg:p-12 flex items-center justify-center min-h-[250px] sm:min-h-[350px] lg:min-h-[500px]">
-              
+
               {/* Promotion Type Badge - Responsive sizing */}
               <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-10">
                 <span className="bg-white/25 backdrop-blur-md text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-bold uppercase shadow-lg">
@@ -173,7 +175,7 @@ const PromotionPopup = () => {
                   </div>
                 )}
 
-                {/* 
+                {/*
                   Floating Discount Badge
                   - Responsive sizing and positioning
                   - Hidden on very small screens if needed
@@ -187,13 +189,13 @@ const PromotionPopup = () => {
               </div>
             </div>
 
-            {/* 
+            {/*
               Right Section: Content Details
               - Mobile: Full width with comfortable padding
               - Tablet+: Flex column with proper spacing
             */}
             <div className="p-6 sm:p-8 md:p-10 lg:p-12 flex flex-col bg-white">
-              
+
               {/* Promotion Title & Description */}
               <div className="mb-4 sm:mb-6">
                 <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2 sm:mb-3 leading-tight">
@@ -214,7 +216,7 @@ const PromotionPopup = () => {
                     {product.category}
                   </p>
 
-                  {/* 
+                  {/*
                     Price Display
                     - Responsive text sizing
                     - Flex wrap for smaller screens
@@ -222,7 +224,6 @@ const PromotionPopup = () => {
                   <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 mb-2 sm:mb-3">
                     {currentPromotion.discount_percentage > 0 ? (
                       <>
-                        
                         <span className="text-xl sm:text-2xl lg:text-3xl text-gray-500 line-through">
                           ₱{product.price}
                         </span>
@@ -240,22 +241,19 @@ const PromotionPopup = () => {
                       <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
-                      You save {(product.price - calculateDiscountedPrice(product.price, currentPromotion.discount_percentage)).toFixed(2)}!
+                      You save ₱{(product.price - calculateDiscountedPrice(product.price, currentPromotion.discount_percentage)).toFixed(2)}!
                     </p>
                   )}
                 </div>
               )}
 
-              {/* 
+              {/*
                 Promotion Period Banner
                 - Responsive padding and text
                 - Improved visual hierarchy
               */}
               <div className="mb-6 sm:mb-8 p-3 sm:p-4 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl shadow-sm">
                 <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
-                  {/* <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                  </svg> */}
                   <span className="font-bold text-yellow-900 text-sm sm:text-base">⚡ Limited Time Offer!</span>
                 </div>
                 <p className="text-xs sm:text-sm text-yellow-800 ml-6 sm:ml-7">
@@ -269,14 +267,14 @@ const PromotionPopup = () => {
                 </p>
               </div>
 
-              {/* 
+              {/*
                 Call to Action Buttons
                 - Mobile: Stacked vertically with full width
                 - Tablet+: Proper spacing
                 - Touch-friendly sizing (min 44px height)
               */}
               <div className="mt-auto space-y-3 sm:space-y-4">
-                
+
                 {/* Primary CTA Button */}
                 <button
                   onClick={handleViewProduct}
@@ -305,7 +303,7 @@ const PromotionPopup = () => {
                 </div>
               </div>
 
-              {/* 
+              {/*
                 Navigation Dots (Carousel Control)
                 - Only shown if multiple promotions
                 - Responsive sizing and spacing
@@ -313,7 +311,7 @@ const PromotionPopup = () => {
               */}
               {activePromotions.length > 1 && (
                 <div className="flex items-center justify-center gap-3 sm:gap-4 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
-                  
+
                   {/* Previous Button */}
                   <button
                     onClick={handlePrevious}
@@ -332,8 +330,8 @@ const PromotionPopup = () => {
                         key={idx}
                         onClick={() => setCurrentIndex(idx)}
                         className={`h-2 sm:h-2.5 rounded-full transition-all duration-300 ${
-                          idx === currentIndex 
-                            ? 'w-6 sm:w-8 bg-blue-600' 
+                          idx === currentIndex
+                            ? 'w-6 sm:w-8 bg-blue-600'
                             : 'w-2 sm:w-2.5 bg-gray-300 hover:bg-gray-400'
                         }`}
                         aria-label={`Go to promotion ${idx + 1}`}
@@ -359,7 +357,7 @@ const PromotionPopup = () => {
         </div>
       </div>
 
-      {/* 
+      {/*
         CSS Animations
         - Smooth fade-in for backdrop
         - Slide-up animation for modal
@@ -367,14 +365,10 @@ const PromotionPopup = () => {
       */}
       <style jsx>{`
         @keyframes fadeIn {
-          from { 
-            opacity: 0; 
-          }
-          to { 
-            opacity: 1; 
-          }
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
-        
+
         @keyframes slideUp {
           from {
             opacity: 0;
@@ -385,11 +379,11 @@ const PromotionPopup = () => {
             transform: translateY(0) scale(1);
           }
         }
-        
+
         .animate-fadeIn {
           animation: fadeIn 0.3s ease-out;
         }
-        
+
         .animate-slideUp {
           animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
@@ -398,16 +392,16 @@ const PromotionPopup = () => {
         .overflow-y-auto::-webkit-scrollbar {
           width: 8px;
         }
-        
+
         .overflow-y-auto::-webkit-scrollbar-track {
           background: #f1f1f1;
         }
-        
+
         .overflow-y-auto::-webkit-scrollbar-thumb {
           background: #888;
           border-radius: 4px;
         }
-        
+
         .overflow-y-auto::-webkit-scrollbar-thumb:hover {
           background: #555;
         }

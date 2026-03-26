@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+// const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const PromotionRequestPage = () => {
   const navigate = useNavigate();
@@ -149,7 +150,7 @@ const PromotionRequestPage = () => {
     try {
       const submitData = {
         user_id:               userId,
-        product_id:            parseInt(formData.product_id),
+        product_id:            formData.product_id,  // ✅ FIX: removed parseInt() — product_id is a UUID string
         promotion_type:        'banner',
         promotion_title:       formData.promotion_title.trim(),
         promotion_description: formData.promotion_description.trim(),
@@ -188,7 +189,7 @@ const PromotionRequestPage = () => {
     }
   };
 
-  const selectedProduct = products.find(p => p.id === parseInt(formData.product_id));
+  const selectedProduct = products.find(p => p.id === formData.product_id);  // ✅ FIX: no parseInt here either
 
   const formatDate = (ds) => new Date(ds).toLocaleDateString('en-PH', {
     month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
