@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, FileText, CreditCard, Calendar, Store, AtSign } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const SellerRegistration = () => {
   const navigate = useNavigate();

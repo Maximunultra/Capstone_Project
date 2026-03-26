@@ -14,10 +14,11 @@ import {
   MessageCircle,
   FileText,
   RefreshCcw,
+  ClipboardList,
 } from 'lucide-react';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   const location    = useLocation();
@@ -33,8 +34,6 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   const [settingsOpen, setSettingsOpen] = useState(isInSettings);
 
   const rolePrefix = userRole || JSON.parse(localStorage.getItem("user") || '{}').role || 'admin';
-
-  // ── Fetchers ──────────────────────────────────────────────
 
   const fetchPendingProducts = async () => {
     try {
@@ -104,7 +103,6 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     if (currentPath.includes('/settings'))    setSettingsOpen(true);
   }, [currentPath]);
 
-  // Clear badges locally when admin visits the page
   useEffect(() => {
     if (currentPath.includes('/messages')) setUnreadMessages(0);
   }, [currentPath]);
@@ -113,14 +111,11 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     if (currentPath.includes('/refunds')) setPendingRefunds(0);
   }, [currentPath]);
 
-  // Re-sync when AdminMessagesPage marks messages as read
   useEffect(() => {
     const handler = () => fetchUnreadMessages();
     window.addEventListener('messagesRead', handler);
     return () => window.removeEventListener('messagesRead', handler);
   }, []);
-
-  // ── Nav items ─────────────────────────────────────────────
 
   const mainNavItems = [
     {
@@ -175,15 +170,19 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
     },
   ];
 
+  // ✅ Added Activity Logs after Category Rules
   const settingsSubItems = [
     {
       to:    `/${rolePrefix}/settings/category-rules`,
       label: "Category Rules",
       icon:  <BookOpen className="w-3.5 h-3.5 mr-2" />,
     },
+    {
+      to:    `/${rolePrefix}/settings/activity-logs`,
+      label: "Activity Logs",
+      icon:  <ClipboardList className="w-3.5 h-3.5 mr-2" />,
+    },
   ];
-
-  // ── Handlers ──────────────────────────────────────────────
 
   const handleNavClick = (item) => {
     if (isMobile) toggleSidebar();
@@ -195,8 +194,6 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
   };
 
   const formatBadge = (n) => (n > 99 ? '99+' : n);
-
-  // ── Render ────────────────────────────────────────────────
 
   return (
     <aside
@@ -250,7 +247,6 @@ const Sidebar = ({ isOpen, toggleSidebar, userRole, isMobile }) => {
               >
                 {item.icon}
                 <span className="truncate">{item.label}</span>
-
                 {item.badge > 0 && (
                   <span className={`
                     ml-auto flex items-center justify-center

@@ -27,7 +27,6 @@ const exportToExcel = async (sheets, filename) => {
   const wb   = XLSX.utils.book_new();
   sheets.forEach(({ name, data }) => {
     const ws = XLSX.utils.json_to_sheet(data);
-    // Auto column widths
     const cols = Object.keys(data[0] || {}).map(k => ({
       wch: Math.max(k.length, ...data.map(r => String(r[k] ?? '').length), 10)
     }));
@@ -63,9 +62,8 @@ const ExportGroup = ({ onExcel, onCSV }) => (
   </div>
 );
 
-
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
 
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
 const fmtDate = (d) => d.toISOString().split('T')[0];
@@ -92,7 +90,6 @@ const currency = (v) => new Intl.NumberFormat('en-PH',{style:'currency',currency
 const num      = (v) => new Intl.NumberFormat('en-US').format(Math.round(parseFloat(v)||0));
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
 const DatePicker = ({ start, end, onChange }) => {
   const [active, setActive] = useState('this_month');
   const [cs, setCs] = useState(start);
@@ -179,7 +176,7 @@ const HBar = ({ label, value, max, color, prefix='', suffix='', bold=false }) =>
   );
 };
 
-const Badge = ({ label, color }) => {
+const Badge = ({ label }) => {
   const styles = {
     pending:    'bg-amber-100 text-amber-800',
     processing: 'bg-blue-100 text-blue-800',
@@ -194,24 +191,29 @@ const Badge = ({ label, color }) => {
   return <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[label?.toLowerCase()]||'bg-gray-100 text-gray-700'}`}>{label}</span>;
 };
 
-// ─── Revenue Bar Chart (SVG) ──────────────────────────────────────────────────
+// ✅ FIX 1: fmtVal now uses 10,000 threshold — ₱2,572 stays as ₱2,572 not ₱2.6k
 const BarChart = ({ data, valueKey, labelKey, color='#3b82f6', prefix='₱', height=220 }) => {
   const [hovered, setHovered] = useState(null);
-  const vals = data.map(d=>parseFloat(d[valueKey])||0);
+  const vals = data.map(d => { const v = parseFloat(d[valueKey]); return isNaN(v) ? 0 : v; });
   const max  = Math.max(...vals, 1);
 
+  // ✅ FIX 1: Raised threshold from 1000 to 10000 so values like ₱2,572 show exactly
   const fmtVal = (v) => {
-    if (prefix==='₱') return v>=1000?`₱${(v/1000).toFixed(0)}k`:`₱${v}`;
-    return `${v}`;
+    if (prefix === '₱') {
+      if (v >= 10000) return `₱${(v/1000).toFixed(1)}k`;
+      return `₱${Math.round(v).toLocaleString()}`;
+    }
+    return `${Math.round(v).toLocaleString()}`;
   };
 
   return (
     <div className="w-full overflow-x-auto">
-      <div className={`flex items-end gap-1.5 px-2`} style={{height, minWidth: Math.max(data.length*40,300)}}>
-        {data.map((d,i)=>{
-          const val = parseFloat(d[valueKey])||0;
-          const pct = max>0?(val/max)*100:0;
-          const barH = (pct/100)*(height-40);
+      <div className="flex items-end gap-1.5 px-2" style={{height, minWidth: Math.max(data.length*40,300)}}>
+        {data.map((d,i) => {
+          const rawVal = parseFloat(d[valueKey]);
+          const val    = isNaN(rawVal) ? 0 : rawVal;
+          const pct    = max > 0 ? (val/max)*100 : 0;
+          const barH   = (pct/100)*(height-40);
           return (
             <div key={i} className="flex-1 flex flex-col items-center justify-end group relative"
               onMouseEnter={()=>setHovered(i)} onMouseLeave={()=>setHovered(null)}>
@@ -239,7 +241,6 @@ const BarChart = ({ data, valueKey, labelKey, color='#3b82f6', prefix='₱', hei
   );
 };
 
-// ─── Donut Chart (SVG) ────────────────────────────────────────────────────────
 const DonutChart = ({ data }) => {
   const [hovered, setHovered] = useState(null);
   const size=180; const cx=90; const cy=90; const R=70; const r=42;
@@ -283,7 +284,6 @@ const DonutChart = ({ data }) => {
   );
 };
 
-// ─── Status Funnel ────────────────────────────────────────────────────────────
 const StatusFunnel = ({ data }) => {
   const max = Math.max(...data.map(d=>d.count), 1);
   return (
@@ -310,20 +310,417 @@ const StatusFunnel = ({ data }) => {
   );
 };
 
+// ─── Products by Seller Tab Component ────────────────────────────────────────
+const ProductsTab = ({ start, end, topProducts, topSellers, categories, exportProducts, exportSellers, apiBase, token }) => {
+  const [allProducts,     setAllProducts    ] = useState([]);
+  const [prodLoading,     setProdLoading    ] = useState(false);
+  const [prodSearch,      setProdSearch     ] = useState('');
+  const [prodSellerF,     setProdSellerF    ] = useState('all');
+  const [prodCategoryF,   setProdCategoryF  ] = useState('all');
+  const [prodStatusF,     setProdStatusF    ] = useState('all');
+  const [prodSortKey,     setProdSortKey    ] = useState('revenue');
+  const [prodSortDir,     setProdSortDir    ] = useState('desc');
+  const [sellerOptions,   setSellerOptions  ] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setProdLoading(true);
+      try {
+        const res = await fetch(
+          `${apiBase}/admin/analytics/products-by-seller?startDate=${start}&endDate=${end}`,
+          { headers: { Authorization: `Bearer ${token()}` } }
+        );
+        const data = await res.json();
+        if (data.success) {
+          setAllProducts(data.data || []);
+          const sellers = [...new Map(
+            (data.data||[]).filter(p=>p.seller_id)
+              .map(p=>[p.seller_id,{id:p.seller_id,name:p.seller_name}])
+          ).values()].sort((a,b)=>a.name.localeCompare(b.name));
+          const cats = [...new Set((data.data||[]).map(p=>p.category).filter(Boolean))].sort();
+          setSellerOptions(sellers);
+          setCategoryOptions(cats);
+        }
+      } catch(e) { console.error('Products fetch error:', e); }
+      finally { setProdLoading(false); }
+    };
+    fetchProducts();
+  }, [start, end]);
+
+  const toggleSort = (key) => {
+    if (prodSortKey === key) setProdSortDir(d => d==='asc'?'desc':'asc');
+    else { setProdSortKey(key); setProdSortDir('desc'); }
+  };
+
+  const SortTh = ({ col, label, align='left' }) => (
+    <th onClick={()=>toggleSort(col)}
+      className={`px-4 py-3 text-${align} text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition`}>
+      <div className={`flex items-center gap-1 ${align==='right'?'justify-end':align==='center'?'justify-center':''}`}>
+        {label}
+        {prodSortKey===col
+          ? <span className="text-[10px] text-blue-600">{prodSortDir==='asc'?'▲':'▼'}</span>
+          : <span className="text-[10px] text-gray-300">↕</span>}
+      </div>
+    </th>
+  );
+
+  const filtered = allProducts.filter(p => {
+    const q = prodSearch.toLowerCase();
+    const matchSearch   = !prodSearch ||
+      p.product_name?.toLowerCase().includes(q) ||
+      p.brand?.toLowerCase().includes(q) ||
+      p.seller_name?.toLowerCase().includes(q) ||
+      p.category?.toLowerCase().includes(q);
+    const matchSeller   = prodSellerF   === 'all' || p.seller_id === prodSellerF;
+    const matchCategory = prodCategoryF === 'all' || p.category  === prodCategoryF;
+    const matchStatus   = prodStatusF   === 'all' || (prodStatusF==='active' ? p.is_active : !p.is_active);
+    return matchSearch && matchSeller && matchCategory && matchStatus;
+  });
+
+  const sorted = [...filtered].sort((a,b) => {
+    let va = a[prodSortKey], vb = b[prodSortKey];
+    if (['revenue','price','units_sold','stock'].includes(prodSortKey)) {
+      va=parseFloat(va)||0; vb=parseFloat(vb)||0;
+    } else {
+      va=String(va||'').toLowerCase(); vb=String(vb||'').toLowerCase();
+    }
+    const cmp = typeof va==='number' ? va-vb : va.localeCompare(vb);
+    return prodSortDir==='asc' ? cmp : -cmp;
+  });
+
+  const hasFilters = prodSearch || prodSellerF!=='all' || prodCategoryF!=='all' || prodStatusF!=='all';
+
+  const exportProductsBySeller = async (type) => {
+    if (!sorted.length) return;
+    const rows = sorted.map((p,i) => ({
+      'Rank':           i+1,
+      'Product Name':   p.product_name,
+      'Brand':          p.brand || '—',
+      'Category':       p.category,
+      'Price (₱)':      parseFloat(p.price).toFixed(2),
+      'Stock':          p.stock,
+      'Status':         p.is_active ? 'Active' : 'Inactive',
+      'Units Sold':     p.units_sold,
+      'Revenue (₱)':    parseFloat(p.revenue).toFixed(2),
+      'Seller':         p.seller_name,
+      'Seller Email':   p.seller_email,
+    }));
+    const filterSuffix = [
+      prodSellerF   !== 'all' ? `seller-${sellerOptions.find(s=>s.id===prodSellerF)?.name||prodSellerF}` : '',
+      prodCategoryF !== 'all' ? `cat-${prodCategoryF}` : '',
+      prodStatusF   !== 'all' ? prodStatusF : '',
+    ].filter(Boolean).join('_');
+    const fn = `products_by_seller_${start}_${end}${filterSuffix?'_'+filterSuffix:''}`;
+    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
+    else await exportToExcel([{ name: 'Products by Seller', data: rows }], `${fn}.xlsx`);
+  };
+
+  const filteredRevenue    = filtered.reduce((s,p)=>s+parseFloat(p.revenue||0), 0);
+  const filteredUnitsSold  = filtered.reduce((s,p)=>s+p.units_sold, 0);
+  const filteredActive     = filtered.filter(p=>p.is_active).length;
+  const filteredOutOfStock = filtered.filter(p=>p.stock===0).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader title="Best Selling Products" sub="By revenue · delivered orders">
+            <ExportGroup onExcel={()=>exportProducts('excel')} onCSV={()=>exportProducts('csv')}/>
+          </CardHeader>
+          <div className="p-6">
+            {topProducts.length>0 ? (
+              <>
+                {topProducts.slice(0,8).map((p,i)=>(
+                  <HBar key={i} label={`${i+1}. ${p.name}`}
+                    value={parseFloat(p.revenue)} max={parseFloat(topProducts[0].revenue)}
+                    color="#3b82f6" prefix="₱"/>
+                ))}
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">#</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Product</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Units</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {topProducts.map((p,i)=>(
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-xs text-gray-400">{i+1}</td>
+                          <td className="px-3 py-2 text-sm text-gray-800 font-medium truncate max-w-[150px]">{p.name}</td>
+                          <td className="px-3 py-2 text-right text-sm text-gray-600">{num(p.sales)}</td>
+                          <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900">{currency(p.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : <p className="text-center text-gray-400 py-10 text-sm">No product data</p>}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Top Sellers / Stores" sub="By revenue · delivered orders">
+            <ExportGroup onExcel={()=>exportSellers('excel')} onCSV={()=>exportSellers('csv')}/>
+          </CardHeader>
+          <div className="p-6">
+            {topSellers.length>0 ? (
+              <>
+                {topSellers.slice(0,8).map((s,i)=>(
+                  <HBar key={i} label={`${i+1}. ${s.seller_name}`}
+                    value={parseFloat(s.total_revenue)} max={parseFloat(topSellers[0].total_revenue)}
+                    color="#10b981" prefix="₱"/>
+                ))}
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Seller</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Orders</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Items</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {topSellers.map((s,i)=>(
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2">
+                            <p className="text-sm font-medium text-gray-800 truncate max-w-[140px]">{s.seller_name}</p>
+                            <p className="text-xs text-gray-400">{s.seller_email}</p>
+                          </td>
+                          <td className="px-3 py-2 text-right text-sm text-gray-600">{num(s.total_orders)}</td>
+                          <td className="px-3 py-2 text-right text-sm text-gray-600">{num(s.items_sold)}</td>
+                          <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900">{currency(s.total_revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : <p className="text-center text-gray-400 py-10 text-sm">No seller data</p>}
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader title="Sales by Category" sub="Revenue share from delivered orders"/>
+        <div className="p-6">
+          {categories.length>0 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+              <DonutChart data={categories}/>
+              <div>
+                {categories.map((c,i)=>(
+                  <HBar key={i} label={c.name} value={c.value} max={100} color={c.color} suffix="%" bold/>
+                ))}
+              </div>
+            </div>
+          ) : <p className="text-center text-gray-400 py-10 text-sm">No category data</p>}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="All Products by Seller"
+          sub={`${sorted.length} product${sorted.length!==1?'s':''} · ${allProducts.length} total${hasFilters?' (filtered)':''}`}>
+          <div className="flex items-center gap-2">
+            {hasFilters && (
+              <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full font-medium whitespace-nowrap">
+                📤 Exporting {sorted.length} filtered rows
+              </span>
+            )}
+            <ExportGroup onExcel={()=>exportProductsBySeller('excel')} onCSV={()=>exportProductsBySeller('csv')}/>
+          </div>
+        </CardHeader>
+
+        <div className="px-4 py-3 border-b border-gray-100 space-y-3">
+          <div className="relative">
+            <svg className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input type="text" placeholder="Search by product name, brand, category, or seller..."
+              value={prodSearch} onChange={e=>setProdSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={prodSellerF} onChange={e=>setProdSellerF(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600 max-w-[200px]">
+              <option value="all">All Store</option>
+              {sellerOptions.map(s=>(<option key={s.id} value={s.id}>{s.name}</option>))}
+            </select>
+            <select value={prodCategoryF} onChange={e=>setProdCategoryF(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
+              <option value="all">All Categories</option>
+              {categoryOptions.map(c=>(<option key={c} value={c}>{c}</option>))}
+            </select>
+            <select value={prodStatusF} onChange={e=>setProdStatusF(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+            <div className="ml-auto flex items-center gap-2">
+              {hasFilters && (
+                <>
+                  <span className="text-xs text-gray-500">{sorted.length} result{sorted.length!==1?'s':''}</span>
+                  <button onClick={()=>{setProdSearch('');setProdSellerF('all');setProdCategoryF('all');setProdStatusF('all');}}
+                    className="text-xs px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition">
+                    Clear all
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {(prodSellerF!=='all'||prodCategoryF!=='all'||prodStatusF!=='all') && (
+            <div className="flex flex-wrap gap-1.5">
+              {prodSellerF!=='all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">
+                  Seller: {sellerOptions.find(s=>s.id===prodSellerF)?.name||prodSellerF}
+                  <button onClick={()=>setProdSellerF('all')} className="hover:text-blue-900 ml-0.5 font-bold">×</button>
+                </span>
+              )}
+              {prodCategoryF!=='all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full border border-purple-200">
+                  Category: {prodCategoryF}
+                  <button onClick={()=>setProdCategoryF('all')} className="hover:text-purple-900 ml-0.5 font-bold">×</button>
+                </span>
+              )}
+              {prodStatusF!=='all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full border border-green-200">
+                  Status: {prodStatusF}
+                  <button onClick={()=>setProdStatusF('all')} className="hover:text-green-900 ml-0.5 font-bold">×</button>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {!prodLoading && allProducts.length > 0 && (
+          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-4">
+            <div className="flex items-center gap-1.5 text-xs text-gray-600"><span className="font-semibold text-gray-900">{filtered.length}</span> products</div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-600"><span className="font-semibold text-blue-700">{currency(filteredRevenue)}</span> revenue</div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-600"><span className="font-semibold text-purple-700">{num(filteredUnitsSold)}</span> units sold</div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-600"><span className="font-semibold text-green-700">{filteredActive}</span> active</div>
+            {filteredOutOfStock > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className="font-semibold text-red-600">{filteredOutOfStock}</span>
+                <span className="text-red-500">out of stock</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          {prodLoading ? (
+            <div className="flex flex-col items-center justify-center p-16 gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"/>
+              <p className="text-xs text-gray-400">Loading products...</p>
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="text-center py-14">
+              <p className="text-gray-400 text-sm">{allProducts.length===0?'No products found':'No products match your filters'}</p>
+              {hasFilters && (
+                <button onClick={()=>{setProdSearch('');setProdSellerF('all');setProdCategoryF('all');setProdStatusF('all');}}
+                  className="text-xs text-blue-600 hover:underline mt-1">Clear all filters</button>
+              )}
+            </div>
+          ) : (
+            <>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-10">#</th>
+                    <SortTh col="product_name" label="Product"    align="left"  />
+                    <SortTh col="category"     label="Category"   align="left"  />
+                    <SortTh col="brand"        label="Brand"      align="left"  />
+                    <SortTh col="price"        label="Price"      align="right" />
+                    <SortTh col="stock"        label="Stock"      align="center"/>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Status</th>
+                    <SortTh col="units_sold"   label="Units Sold" align="center"/>
+                    <SortTh col="revenue"      label="Revenue"    align="right" />
+                    <SortTh col="seller_name"  label="Seller"     align="left"  />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {sorted.slice(0,200).map((p,i) => {
+                    const isOutOfStock = p.stock === 0;
+                    const isLowStock   = p.stock > 0 && p.stock <= 5;
+                    return (
+                      <tr key={p.product_id||i} className={`hover:bg-gray-50/80 transition-colors ${!p.is_active?'bg-gray-50/50':''}`}>
+                        <td className="px-4 py-3 text-xs text-gray-400 tabular-nums">{i+1}</td>
+                        <td className="px-4 py-3 max-w-[200px]">
+                          <p className={`text-sm font-medium truncate ${p.is_active?'text-gray-900':'text-gray-400'}`} title={p.product_name}>{p.product_name}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full border border-purple-100 whitespace-nowrap">{p.category}</span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{p.brand||'—'}</td>
+                        <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 tabular-nums whitespace-nowrap">{currency(p.price)}</td>
+                        <td className="px-4 py-3 text-center">
+                          {isOutOfStock ? (
+                            <span className="inline-flex px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full">Out</span>
+                          ) : isLowStock ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-semibold rounded-full border border-amber-200">⚠ {p.stock}</span>
+                          ) : (
+                            <span className="text-sm font-semibold text-gray-700 tabular-nums">{num(p.stock)}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${p.is_active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}`}>
+                            {p.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {p.units_sold > 0
+                            ? <span className="text-sm font-semibold text-blue-700 tabular-nums">{num(p.units_sold)}</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                          {parseFloat(p.revenue) > 0
+                            ? <span className="text-sm font-bold text-gray-900">{currency(p.revenue)}</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 max-w-[150px]">
+                          <p className="text-xs font-medium text-gray-800 truncate" title={p.seller_name}>{p.seller_name}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{p.seller_email}</p>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {sorted.length > 200 && (
+                <div className="px-4 py-3.5 bg-gradient-to-r from-gray-50 to-white border-t border-gray-100 text-center">
+                  <p className="text-xs text-gray-500">
+                    Showing <span className="font-semibold">200</span> of <span className="font-semibold">{sorted.length}</span> products —
+                    use filters to narrow down or <button onClick={()=>exportProductsBySeller('excel')} className="text-blue-600 hover:underline font-medium">export all to Excel</button>
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const AdminReports = () => {
   const initR = getPreset('this_month');
   const [start, setStart] = useState(initR.s);
   const [end,   setEnd  ] = useState(initR.e);
   const [year,  setYear ] = useState(new Date().getFullYear());
-  const [groupBy, setGroupBy] = useState('month');
-  const [metric,  setMetric ] = useState('revenue');
+  const [groupBy,   setGroupBy  ] = useState('month');
+  const [metric,    setMetric   ] = useState('gross_revenue');
   const [activeTab, setActiveTab] = useState('overview');
   const [payView,   setPayView  ] = useState('breakdown');
   const [loading,   setLoading  ] = useState(true);
   const [error,     setError    ] = useState(null);
 
-  // Data state
   const [summary,      setSummary     ] = useState(null);
   const [salesData,    setSalesData   ] = useState([]);
   const [orderStatus,  setOrderStatus ] = useState([]);
@@ -333,39 +730,30 @@ const AdminReports = () => {
   const [payBreakdown, setPayBreakdown] = useState([]);
   const [sellersPay,   setSellersPay  ] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [refundStats,  setRefundStats]  = useState({ pending:0, seller_pending:0, approved:0, rejected:0, total_refunded:0 });
-  const [logs,         setLogs]         = useState([]);
-  const [logsTotal,    setLogsTotal]    = useState(0);
-  const [logsLoading,  setLogsLoading]  = useState(false);
-  const [logCategory,  setLogCategory]  = useState('all');
-  const [logRole,      setLogRole]      = useState('all');
-  const [logOffset,    setLogOffset]    = useState(0);
-  const LOG_LIMIT = 50;
-  const [orders,       setOrders]       = useState([]);
-  const [ordersLoading,setOrdersLoading]= useState(false);
+  const [refundStats,  setRefundStats ] = useState({ pending:0, seller_pending:0, approved:0, rejected:0, total_refunded:0 });
+  const [orders,       setOrders      ] = useState([]);
   const [ordersSearch, setOrdersSearch] = useState('');
   const [ordersStatusF,setOrdersStatusF]= useState('all');
-  const [ordersPayF,   setOrdersPayF]   = useState('all');
-  const [refundMap,    setRefundMap]    = useState({});  // orderId → refund request
-  const [ordersSellerF,setOrdersSellerF]= useState('all'); // seller filter
-  const [ordersSortKey, setOrdersSortKey] = useState('order_date');
-  const [ordersSortDir, setOrdersSortDir] = useState('desc');
-  const [sellerList,   setSellerList]   = useState([]);    // list of sellers for dropdown
-  // ── Payment tab filters ──────────────────────────────────────────────────
-  const [txnMethodF,   setTxnMethodF]   = useState('all'); // transaction method filter
-  const [txnStatusF,   setTxnStatusF]   = useState('all'); // transaction order status filter
-  const [txnSearch,    setTxnSearch]    = useState('');    // transaction search
-  const [sellerSearch, setSellerSearch] = useState('');    // seller table search
+  const [ordersPayF,   setOrdersPayF  ] = useState('all');
+  const [refundMap,    setRefundMap   ] = useState({});
+  const [ordersSellerF,setOrdersSellerF]= useState('all');
+  const [ordersSortKey,setOrdersSortKey]= useState('order_date');
+  const [ordersSortDir,setOrdersSortDir]= useState('desc');
+  const [sellerList,   setSellerList  ] = useState([]);
+  const [txnMethodF,   setTxnMethodF  ] = useState('all');
+  const [txnStatusF,   setTxnStatusF  ] = useState('all');
+  const [txnSearch,    setTxnSearch   ] = useState('');
+  const [sellerSearch, setSellerSearch] = useState('');
 
   const getOrderSortValue = (o, key) => {
-    if (key === 'order_date') return new Date(o.order_date).getTime() || 0;
+    if (key === 'order_date')   return new Date(o.order_date).getTime() || 0;
     if (key === 'order_number') return o.order_number || '';
-    if (key === 'customer') return o.shipping_full_name || '';
-    if (key === 'status') return o.order_status || '';
-    if (key === 'payment') return o.payment_method || '';
-    if (key === 'total') return parseFloat(o.total_amount) || 0;
-    if (key === 'seller') return (o.sellers?.[0]?.name) || o.seller_name || '';
-    if (key === 'refund') return refundMap[o.id]?.status || '';
+    if (key === 'customer')     return o.shipping_full_name || '';
+    if (key === 'status')       return o.order_status || '';
+    if (key === 'payment')      return o.payment_method || '';
+    if (key === 'total')        return parseFloat(o.total_amount) || 0;
+    if (key === 'seller')       return (o.sellers?.[0]?.name) || o.seller_name || '';
+    if (key === 'refund')       return refundMap[o.id]?.status || '';
     return '';
   };
 
@@ -383,15 +771,11 @@ const AdminReports = () => {
   };
 
   const toggleOrdersSort = (key) => {
-    if (ordersSortKey === key) {
-      setOrdersSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setOrdersSortKey(key);
-      setOrdersSortDir('asc');
-    }
+    if (ordersSortKey === key) setOrdersSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setOrdersSortKey(key); setOrdersSortDir('asc'); }
   };
 
-  const token = () => localStorage.getItem('token');
+  const token  = () => localStorage.getItem('token');
   const fetchJ = async (url) => {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -416,61 +800,46 @@ const AdminReports = () => {
         fetchJ(`${base}/sellers-by-payment?${p}`).catch(()=>({success:false,data:[]})),
         fetchJ(`${base}/payment-transactions?${p}`).catch(()=>({success:false,data:[]})),
       ]);
-      if (s.success)    setSummary(s.stats);
-      if (sp.success)   setSalesData(sp.data||[]);
-      if (os.success)   setOrderStatus(os.data||[]);
-      if (cat.success)  setCategories(cat.data||[]);
-      if (prod.success) setTopProducts(prod.data||[]);
-      if (sell.success) setTopSellers(sell.data||[]);
-      if (pb.success)   setPayBreakdown(pb.data||[]);
+      if (s.success)     setSummary(s.stats);
+      if (sp.success)    setSalesData(sp.data||[]);
+      if (os.success)    setOrderStatus(os.data||[]);
+      if (cat.success)   setCategories(cat.data||[]);
+      if (prod.success)  setTopProducts(prod.data||[]);
+      if (sell.success)  setTopSellers(sell.data||[]);
+      if (pb.success)    setPayBreakdown(pb.data||[]);
       if (sellP.success) setSellersPay(sellP.data||[]);
-      if (txn.success)  setTransactions(txn.data||[]);
+      if (txn.success)   setTransactions(txn.data||[]);
 
-      // Fetch all orders for the orders table (non-fatal)
       try {
-        const [ordRes, sellerRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/admin/analytics/orders-all?startDate=${start}&endDate=${end}&limit=200`, {
-            headers: { Authorization: `Bearer ${token()}` }
-          }),
-          fetch(`${API_BASE_URL}/admin/analytics/orders-all?startDate=${start}&endDate=${end}&limit=200&includeSellers=true`, {
-            headers: { Authorization: `Bearer ${token()}` }
-          }),
-        ]);
+        const ordRes = await fetch(
+          `${API_BASE_URL}/admin/analytics/orders-all?startDate=${start}&endDate=${end}&limit=200`,
+          { headers: { Authorization: `Bearer ${token()}` } }
+        );
         if (ordRes.ok) {
           const ordData = await ordRes.json();
           const fetchedOrders = ordData.orders || [];
           setOrders(fetchedOrders);
-          // Build unique seller list from orders
-          // Build seller list from enriched order data
-          const sellerMap = {};
+          const sm = {};
           fetchedOrders.forEach(o => {
-            // Primary seller
-            if (o.seller_id && o.seller_name) sellerMap[o.seller_id] = o.seller_name;
-            // All sellers in multi-seller orders
-            (o.sellers || []).forEach(s => { if (s.id && s.name) sellerMap[s.id] = s.name; });
+            if (o.seller_id && o.seller_name) sm[o.seller_id] = o.seller_name;
+            (o.sellers||[]).forEach(sv => { if (sv.id && sv.name) sm[sv.id] = sv.name; });
           });
-          setSellerList(
-            Object.entries(sellerMap)
-              .map(([id, name]) => ({ id, name }))
-              .sort((a, b) => a.name.localeCompare(b.name))
-          );
+          setSellerList(Object.entries(sm).map(([id,name])=>({id,name})).sort((a,b)=>a.name.localeCompare(b.name)));
         }
       } catch (_) {}
 
-      // Fetch refund requests to build order→refund map
       try {
         const rfAllRes  = await fetch(`${API_BASE_URL}/refunds?limit=500`);
         const rfAllData = await rfAllRes.json();
         if (rfAllData.success) {
           const map = {};
-          (rfAllData.refund_requests || []).forEach(r => { map[r.order_id] = r; });
+          (rfAllData.refund_requests||[]).forEach(r => { map[r.order_id] = r; });
           setRefundMap(map);
         }
       } catch (_) {}
 
-      // Fetch refund stats (separate call — non-fatal)
       try {
-        const rf = await fetch(`${API_BASE_URL}/refunds/stats`);
+        const rf     = await fetch(`${API_BASE_URL}/refunds/stats`);
         const rfData = await rf.json();
         if (rfData.success && rfData.stats) {
           setRefundStats({
@@ -481,9 +850,7 @@ const AdminReports = () => {
             total_refunded: parseFloat(rfData.stats.total_refunded || 0),
           });
         }
-      } catch (_) {
-        console.warn('Could not fetch refund stats — using defaults');
-      }
+      } catch (_) { console.warn('Could not fetch refund stats'); }
     } catch (e) {
       setError('Failed to load analytics. ' + e.message);
     } finally {
@@ -495,62 +862,14 @@ const AdminReports = () => {
 
   const handleRange = (s, e) => { setStart(s); setEnd(e); };
 
-  const fetchLogs = async (category = logCategory, role = logRole, offset = 0) => {
-    setLogsLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: LOG_LIMIT, offset });
-      if (category !== 'all') params.set('category', category);
-      if (role     !== 'all') params.set('role',     role);
-      const res  = await fetch(`${API_BASE_URL}/admin/analytics/activity-logs?${params}`, {
-        headers: { Authorization: `Bearer ${token()}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setLogs(data.logs || []);
-        setLogsTotal(data.total || 0);
-        setLogOffset(offset);
-      }
-    } catch (e) { console.error('Logs fetch error:', e); }
-    finally { setLogsLoading(false); }
-  };
-
   // ─── Export Handlers ──────────────────────────────────────────────────────
-  const exportSummary = async (type) => {
-    const rows = [{
-      'Period':              `${start} to ${end}`,
-      'Total Revenue (₱)':  parseFloat(st.totalRevenue||0).toFixed(2),
-      'Platform Fees (₱)':  parseFloat(st.systemCommission||0).toFixed(2),
-      'Seller Revenue (₱)': parseFloat(st.sellerRevenue||0).toFixed(2),
-      'Shipping (₱)':       parseFloat(st.shippingRevenue||0).toFixed(2),
-      'Total Orders':       st.totalOrders||0,
-      'Delivered Orders':   st.deliveredOrders||0,
-      'Cancelled Orders':   st.cancelledOrders||0,
-      'Products Sold':      st.productsSold||0,
-      'Avg Order Value (₱)':parseFloat(st.avgOrderValue||0).toFixed(2),
-      'Revenue Growth (%)': parseFloat(st.revenueGrowth||0).toFixed(1),
-      'GCash Orders':       st.gcashOrders||0,
-      'GCash Revenue (₱)':  parseFloat(st.gcashRevenue||0).toFixed(2),
-      'PayPal Orders':      st.paypalOrders||0,
-      'PayPal Revenue (₱)': parseFloat(st.paypalRevenue||0).toFixed(2),
-      'COD Orders':         st.codOrders||0,
-      'COD Revenue (₱)':    parseFloat(st.codRevenue||0).toFixed(2),
-      'Cancelled Revenue (₱)':   parseFloat(st.cancelledRevenue||0).toFixed(2),
-      'Cancelled Fees Lost (₱)':  parseFloat(st.cancelledFees||0).toFixed(2),
-      'Refunds Approved':          refundStats?.approved || 0,
-      'Total Refunded (₱)':        parseFloat(refundStats?.total_refunded||0).toFixed(2),
-      'Net Revenue (₱)':           Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(refundStats?.total_refunded||0)).toFixed(2),
-    }];
-    const fn = `summary_${start}_${end}`;
-    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
-    else await exportToExcel([{ name: 'Summary', data: rows }], `${fn}.xlsx`);
-  };
-
   const exportSalesData = async (type) => {
     const rows = salesData.map(d => ({
-      'Period':        d.month || d.label || d.week || '',
-      'Revenue (₱)':   d.revenue||0,
-      'Commission (₱)':d.commission||0,
-      'Orders':        d.orders||0,
+      'Period':             d.month || d.label || d.week || '',
+      'Gross Revenue (₱)':  d.gross_revenue || d.revenue || 0,
+      'Net Revenue (₱)':    d.revenue || 0,
+      'Commission (₱)':     d.commission || 0,
+      'Orders':             d.orders || 0,
     }));
     if (!rows.length) return;
     const fn = `sales_${start}_${end}`;
@@ -559,11 +878,7 @@ const AdminReports = () => {
   };
 
   const exportOrderStatus = async (type) => {
-    const rows = orderStatus.map(d => ({
-      'Status':       d.status,
-      'Order Count':  d.count,
-      'Revenue (₱)':  parseFloat(d.revenue||0).toFixed(2),
-    }));
+    const rows = orderStatus.map(d => ({ 'Status': d.status, 'Order Count': d.count, 'Revenue (₱)': parseFloat(d.revenue||0).toFixed(2) }));
     if (!rows.length) return;
     const fn = `order_status_${start}_${end}`;
     if (type==='csv') exportToCSV(rows, `${fn}.csv`);
@@ -571,12 +886,7 @@ const AdminReports = () => {
   };
 
   const exportProducts = async (type) => {
-    const rows = topProducts.map((p,i) => ({
-      'Rank':         i+1,
-      'Product Name': p.name,
-      'Units Sold':   p.sales,
-      'Revenue (₱)':  p.revenue,
-    }));
+    const rows = topProducts.map((p,i) => ({ 'Rank': i+1, 'Product Name': p.name, 'Units Sold': p.sales, 'Revenue (₱)': p.revenue }));
     if (!rows.length) return;
     const fn = `top_products_${start}_${end}`;
     if (type==='csv') exportToCSV(rows, `${fn}.csv`);
@@ -584,14 +894,7 @@ const AdminReports = () => {
   };
 
   const exportSellers = async (type) => {
-    const rows = topSellers.map((s,i) => ({
-      'Rank':          i+1,
-      'Seller Name':   s.seller_name,
-      'Email':         s.seller_email,
-      'Total Orders':  s.total_orders,
-      'Items Sold':    s.items_sold,
-      'Revenue (₱)':   parseFloat(s.total_revenue||0).toFixed(2),
-    }));
+    const rows = topSellers.map((s,i) => ({ 'Rank': i+1, 'Seller Name': s.seller_name, 'Email': s.seller_email, 'Total Orders': s.total_orders, 'Items Sold': s.items_sold, 'Revenue (₱)': parseFloat(s.total_revenue||0).toFixed(2) }));
     if (!rows.length) return;
     const fn = `top_sellers_${start}_${end}`;
     if (type==='csv') exportToCSV(rows, `${fn}.csv`);
@@ -600,47 +903,48 @@ const AdminReports = () => {
 
   const exportOrders = async (type) => {
     const rows = sortOrders(filteredOrders).map(o => ({
-      'Order #':        o.order_number,
-      'Date':           new Date(o.order_date).toLocaleDateString(),
-      'Customer':       o.shipping_full_name || '—',
-      'Status':         o.order_status,
-      'Payment':        o.payment_method?.toUpperCase(),
-      'Payment Status': o.payment_status,
-      'Subtotal (₱)':   parseFloat(o.subtotal||0).toFixed(2),
-      'Shipping (₱)':   parseFloat(o.shipping_fee||0).toFixed(2),
-      'Total (₱)':      parseFloat(o.total_amount||0).toFixed(2),
-      'Seller(s)':      (o.sellers||[]).map(s=>s.name).join(' / ') || o.seller_name || '—',
-      'Refund Status':  refundMap[o.id]?.status || 'none',
+      'Order #':           o.order_number,
+      'Date':              new Date(o.order_date).toLocaleDateString(),
+      'Customer':          o.shipping_full_name || '—',
+      'Status':            o.order_status,
+      'Payment':           o.payment_method?.toUpperCase(),
+      'Payment Status':    o.payment_status,
+      'Subtotal (₱)':      parseFloat(o.subtotal||0).toFixed(2),
+      'Shipping (₱)':      parseFloat(o.shipping_fee||0).toFixed(2),
+      'Total (₱)':         parseFloat(o.total_amount||0).toFixed(2),
+      'Seller(s)':         (o.sellers||[]).map(s=>s.name).join(' / ') || o.seller_name || '—',
+      'Refund Status':     refundMap[o.id]?.status || 'none',
       'Refund Amount (₱)': refundMap[o.id] ? parseFloat(refundMap[o.id].refund_amount||0).toFixed(2) : '—',
     }));
     if (!rows.length) return;
     const fn = `orders_${start}_${end}`;
-    if (type === 'csv') exportToCSV(rows, `${fn}.csv`);
+    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
     else await exportToExcel([{ name: 'Orders', data: rows }], `${fn}.xlsx`);
   };
 
   const exportFinancial = async (type) => {
-    const netRevenue = Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(refundStats?.total_refunded||0));
+    const grossRev   = parseFloat(st.grossRevenue||0);
+    const netRevenue = parseFloat(st.totalRevenue||0);
     const rows = [
-      { 'Component': 'Gross Revenue',            'Amount (₱)': parseFloat(st.totalRevenue||0).toFixed(2),             'Note': 'All delivered orders before refunds' },
-      { 'Component': 'Refunds Issued',            'Amount (₱)': `-${parseFloat(refundStats?.total_refunded||0).toFixed(2)}`, 'Note': `${refundStats?.approved||0} approved refunds` },
-      { 'Component': 'Net Revenue',               'Amount (₱)': netRevenue.toFixed(2),                                'Note': 'Gross minus refunds' },
-      { 'Component': '─────────────',             'Amount (₱)': '',                                                   'Note': '' },
-      { 'Component': 'Seller Revenue (Subtotal)', 'Amount (₱)': parseFloat(st.sellerRevenue||0).toFixed(2),           'Note': 'After refund deductions' },
-      { 'Component': 'Platform Fee (10%)',         'Amount (₱)': parseFloat(st.systemCommission||0).toFixed(2),       'Note': 'After refund deductions' },
-      { 'Component': 'Shipping Collected',        'Amount (₱)': parseFloat(st.shippingRevenue||0).toFixed(2),         'Note': 'After refund deductions' },
-      { 'Component': '─────────────',             'Amount (₱)': '',                                                   'Note': '' },
-      { 'Component': 'Refunds Pending Review',    'Amount (₱)': refundStats?.pending||0,                             'Note': 'Awaiting admin decision' },
-      { 'Component': 'Refunds With Seller (COD)', 'Amount (₱)': refundStats?.seller_pending||0,                      'Note': 'COD awaiting seller confirmation' },
-      { 'Component': 'Refunds Approved',          'Amount (₱)': refundStats?.approved||0,                            'Note': 'Total approved refunds' },
-      { 'Component': 'Refunds Rejected',          'Amount (₱)': refundStats?.rejected||0,                            'Note': 'Total rejected refunds' },
-      { 'Component': '─────────────',             'Amount (₱)': '',                                                   'Note': '' },
-      { 'Component': 'Cancelled Orders',          'Amount (₱)': st.cancelledOrders||0,                               'Note': '' },
-      { 'Component': 'Revenue Lost (Cancelled)',  'Amount (₱)': parseFloat(st.cancelledRevenue||0).toFixed(2),       'Note': 'Orders cancelled before delivery' },
-      { 'Component': 'Fees Lost (Cancelled)',     'Amount (₱)': parseFloat(st.cancelledFees||0).toFixed(2),          'Note': '10% of cancelled subtotals' },
+      { 'Component': 'Gross Revenue',            'Amount (₱)': grossRev.toFixed(2),   'Note': 'All delivered orders before refunds' },
+      { 'Component': 'Refunds Issued',            'Amount (₱)': `-${parseFloat(st.totalRefunded||refundStats?.total_refunded||0).toFixed(2)}`, 'Note': `${refundStats?.approved||0} approved refunds` },
+      { 'Component': 'Net Revenue',               'Amount (₱)': netRevenue.toFixed(2), 'Note': 'Gross minus refunds' },
+      { 'Component': '─────────────',             'Amount (₱)': '', 'Note': '' },
+      { 'Component': 'Seller Revenue (Subtotal)', 'Amount (₱)': parseFloat(st.sellerRevenue||0).toFixed(2),    'Note': 'After refund deductions' },
+      { 'Component': 'Platform Fee (10%)',         'Amount (₱)': parseFloat(st.systemCommission||0).toFixed(2),'Note': 'After refund deductions' },
+      { 'Component': 'Shipping Collected',        'Amount (₱)': parseFloat(st.shippingRevenue||0).toFixed(2),  'Note': 'After refund deductions' },
+      { 'Component': '─────────────',             'Amount (₱)': '', 'Note': '' },
+      { 'Component': 'Refunds Pending Review',    'Amount (₱)': refundStats?.pending||0,        'Note': 'Awaiting admin decision' },
+      { 'Component': 'Refunds With Seller (COD)', 'Amount (₱)': refundStats?.seller_pending||0, 'Note': 'COD awaiting seller confirmation' },
+      { 'Component': 'Refunds Approved',          'Amount (₱)': refundStats?.approved||0,       'Note': 'Total approved refunds' },
+      { 'Component': 'Refunds Rejected',          'Amount (₱)': refundStats?.rejected||0,       'Note': 'Total rejected refunds' },
+      { 'Component': '─────────────',             'Amount (₱)': '', 'Note': '' },
+      { 'Component': 'Cancelled Orders',          'Amount (₱)': st.cancelledOrders||0,                         'Note': '' },
+      { 'Component': 'Revenue Lost (Cancelled)',  'Amount (₱)': parseFloat(st.cancelledRevenue||0).toFixed(2), 'Note': 'Orders cancelled before delivery' },
+      { 'Component': 'Fees Lost (Cancelled)',     'Amount (₱)': parseFloat(st.cancelledFees||0).toFixed(2),    'Note': '10% of cancelled subtotals' },
     ];
     const fn = `financial_report_${start}_${end}`;
-    if (type === 'csv') exportToCSV(rows, `${fn}.csv`);
+    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
     else await exportToExcel([{ name: 'Financial Report', data: rows }], `${fn}.xlsx`);
   };
 
@@ -657,8 +961,8 @@ const AdminReports = () => {
       'Date':           new Date(t.order_date).toLocaleDateString(),
     }));
     if (!rows.length) return;
-    const fn = `transactions_${start}_${end}${txnMethodF !== 'all' ? '_' + txnMethodF : ''}${txnStatusF !== 'all' ? '_' + txnStatusF : ''}`;
-    if (type === 'csv') exportToCSV(rows, `${fn}.csv`);
+    const fn = `transactions_${start}_${end}${txnMethodF!=='all'?'_'+txnMethodF:''}${txnStatusF!=='all'?'_'+txnStatusF:''}`;
+    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
     else await exportToExcel([{ name: 'Transactions', data: rows }], `${fn}.xlsx`);
   };
 
@@ -676,118 +980,105 @@ const AdminReports = () => {
       'Total Rev (₱)':  parseFloat(s.total_revenue||0).toFixed(2),
     }));
     if (!rows.length) return;
-    const fn = `sellers_payment_${start}_${end}${sellerSearch ? '_filtered' : ''}`;
-    if (type === 'csv') exportToCSV(rows, `${fn}.csv`);
+    const fn = `sellers_payment_${start}_${end}${sellerSearch?'_filtered':''}`;
+    if (type==='csv') exportToCSV(rows, `${fn}.csv`);
     else await exportToExcel([{ name: 'Sellers Payment', data: rows }], `${fn}.xlsx`);
   };
 
-  const exportPayments = async (type) => {
-    const fn = `payments_${start}_${end}`;
-    const sheets = [
-      { name: 'By Seller', data: sellersPay.map(s => ({
-          'Seller':          s.seller_name,
-          'Email':           s.seller_email,
-          'GCash Orders':    s.gcash_orders,
-          'GCash Revenue':   parseFloat(s.gcash_revenue||0).toFixed(2),
-          'PayPal Orders':   s.paypal_orders,
-          'PayPal Revenue':  parseFloat(s.paypal_revenue||0).toFixed(2),
-          'COD Orders':      s.cod_orders||0,
-          'COD Revenue':     parseFloat(s.cod_revenue||0).toFixed(2),
-          'Total Orders':    s.total_orders,
-          'Total Revenue':   parseFloat(s.total_revenue||0).toFixed(2),
-        }))
-      },
-      { name: 'Transactions', data: transactions.map(t => ({
-          'Order #':         t.order_number,
-          'Customer':        t.customer_name || '—',
-          'Email':           t.customer_email || '—',
-          'Amount (₱)':      parseFloat(t.total_amount||0).toFixed(2),
-          'Method':          t.payment_method?.toUpperCase(),
-          'Payment Status':  t.payment_status,
-          'Order Status':    t.order_status,
-          'Refund Status':   t.refund?.status || 'none',
-          'Refund Amount':   t.refund ? parseFloat(t.refund.refund_amount||0).toFixed(2) : '—',
-          'Intent ID':       t.payment_intent_id||'',
-          'Capture ID':      t.payment_capture_id||'',
-          'Date':            new Date(t.order_date).toLocaleDateString(),
-        }))
-      },
-    ].filter(s => s.data.length > 0);
-    if (!sheets.length) return;
-    if (type==='csv') {
-      sheets.forEach(s => exportToCSV(s.data, `${fn}_${s.name.toLowerCase().replace(' ','_')}.csv`));
-    } else {
-      await exportToExcel(sheets, `${fn}.xlsx`);
-    }
-  };
-
   const exportFullReport = async () => {
-    const sheets = [];
-    // Add financial summary as first detailed sheet
-    const netRev = Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(refundStats?.total_refunded||0));
-    sheets.unshift({ name: 'Financial Summary', data: [
-      { 'Item': 'Gross Revenue',            'Amount': parseFloat(st.totalRevenue||0).toFixed(2) },
-      { 'Item': 'Total Refunded',           'Amount': `-${parseFloat(refundStats?.total_refunded||0).toFixed(2)}` },
-      { 'Item': 'Net Revenue',              'Amount': netRev.toFixed(2) },
-      { 'Item': 'Platform Fee (net)',        'Amount': parseFloat(st.systemCommission||0).toFixed(2) },
-      { 'Item': 'Seller Revenue (net)',     'Amount': parseFloat(st.sellerRevenue||0).toFixed(2) },
-      { 'Item': 'Shipping (net)',           'Amount': parseFloat(st.shippingRevenue||0).toFixed(2) },
-      { 'Item': 'Cancelled Revenue Lost',   'Amount': parseFloat(st.cancelledRevenue||0).toFixed(2) },
-      { 'Item': 'Cancelled Fees Lost',      'Amount': parseFloat(st.cancelledFees||0).toFixed(2) },
-      { 'Item': 'Refunds Approved',         'Amount': refundStats?.approved||0 },
-      { 'Item': 'Refunds Pending',          'Amount': refundStats?.pending||0 },
-    ]});
-    if (salesData.length) sheets.push({ name: 'Sales by Period', data: salesData.map(d=>({'Period':d.month||d.label||'','Revenue':d.revenue||0,'Commission':d.commission||0,'Orders':d.orders||0})) });
-    if (orderStatus.length) sheets.push({ name: 'Order Status', data: orderStatus.map(d=>({'Status':d.status,'Count':d.count,'Revenue':parseFloat(d.revenue||0).toFixed(2)})) });
-    if (topProducts.length) sheets.push({ name: 'Top Products', data: topProducts.map((p,i)=>({'Rank':i+1,'Product':p.name,'Units':p.sales,'Revenue':p.revenue})) });
-    if (topSellers.length) sheets.push({ name: 'Top Sellers', data: topSellers.map((s,i)=>({'Rank':i+1,'Seller':s.seller_name,'Orders':s.total_orders,'Items':s.items_sold,'Revenue':parseFloat(s.total_revenue||0).toFixed(2)})) });
-    if (categories.length) sheets.push({ name: 'Categories', data: categories.map(c=>({'Category':c.name,'Share (%)':c.value,'Revenue':c.revenue||''})) });
-    if (sellersPay.length) sheets.push({ name: 'Payments by Seller', data: sellersPay.map(s=>({'Seller':s.seller_name,'GCash Orders':s.gcash_orders,'GCash Rev':s.gcash_revenue,'PayPal Orders':s.paypal_orders,'PayPal Rev':s.paypal_revenue,'COD Orders':s.cod_orders||0,'Total':s.total_revenue})) });
-    if (transactions.length) sheets.push({ name: 'Transactions', data: transactions.map(t=>({'Order#':t.order_number,'Amount':t.total_amount,'Method':t.payment_method,'Status':t.payment_status,'Date':new Date(t.order_date).toLocaleDateString()})) });
-    sheets.unshift({ name: 'Summary', data: [{
+    const grossRev = parseFloat(st.grossRevenue||0);
+    const netRev   = parseFloat(st.totalRevenue||0);
+    const sheets   = [];
+    sheets.push({ name: 'Summary', data: [{
       'Period': `${start} to ${end}`,
-      'Total Revenue': parseFloat(st.totalRevenue||0).toFixed(2),
-      'Platform Fees': parseFloat(st.systemCommission||0).toFixed(2),
-      'Seller Revenue': parseFloat(st.sellerRevenue||0).toFixed(2),
-      'Shipping': parseFloat(st.shippingRevenue||0).toFixed(2),
-      'Total Orders': st.totalOrders||0,
-      'Delivered': st.deliveredOrders||0,
-      'Cancelled': st.cancelledOrders||0,
-      'Products Sold': st.productsSold||0,
-      'Avg Order Value': parseFloat(st.avgOrderValue||0).toFixed(2),
+      'Gross Revenue': grossRev.toFixed(2), 'Total Refunded': parseFloat(st.totalRefunded||0).toFixed(2),
+      'Net Revenue': netRev.toFixed(2), 'Platform Fees': parseFloat(st.systemCommission||0).toFixed(2),
+      'Seller Revenue': parseFloat(st.sellerRevenue||0).toFixed(2), 'Shipping': parseFloat(st.shippingRevenue||0).toFixed(2),
+      'Total Orders': st.totalOrders||0, 'Delivered': st.deliveredOrders||0, 'Cancelled': st.cancelledOrders||0,
+      'Products Sold': st.productsSold||0, 'Avg Order Value': parseFloat(st.avgOrderValue||0).toFixed(2),
     }]});
+    sheets.push({ name: 'Financial Summary', data: [
+      { 'Item': 'Gross Revenue',          'Amount': grossRev.toFixed(2) },
+      { 'Item': 'Total Refunded',         'Amount': `-${parseFloat(st.totalRefunded||0).toFixed(2)}` },
+      { 'Item': 'Net Revenue',            'Amount': netRev.toFixed(2) },
+      { 'Item': 'Platform Fee (net)',      'Amount': parseFloat(st.systemCommission||0).toFixed(2) },
+      { 'Item': 'Seller Revenue (net)',   'Amount': parseFloat(st.sellerRevenue||0).toFixed(2) },
+      { 'Item': 'Shipping (net)',         'Amount': parseFloat(st.shippingRevenue||0).toFixed(2) },
+      { 'Item': 'Cancelled Revenue Lost', 'Amount': parseFloat(st.cancelledRevenue||0).toFixed(2) },
+      { 'Item': 'Cancelled Fees Lost',    'Amount': parseFloat(st.cancelledFees||0).toFixed(2) },
+      { 'Item': 'Refunds Approved',       'Amount': refundStats?.approved||0 },
+      { 'Item': 'Refunds Pending',        'Amount': refundStats?.pending||0 },
+    ]});
+    if (salesData.length)    sheets.push({ name: 'Sales by Period',    data: salesData.map(d=>({'Period':d.month||d.label||'','Gross Revenue':d.gross_revenue||d.revenue||0,'Net Revenue':d.revenue||0,'Commission':d.commission||0,'Orders':d.orders||0})) });
+    if (orderStatus.length)  sheets.push({ name: 'Order Status',       data: orderStatus.map(d=>({'Status':d.status,'Count':d.count,'Revenue':parseFloat(d.revenue||0).toFixed(2)})) });
+    if (topProducts.length)  sheets.push({ name: 'Top Products',       data: topProducts.map((p,i)=>({'Rank':i+1,'Product':p.name,'Units':p.sales,'Revenue':p.revenue})) });
+    if (topSellers.length)   sheets.push({ name: 'Top Sellers',        data: topSellers.map((s,i)=>({'Rank':i+1,'Seller':s.seller_name,'Orders':s.total_orders,'Items':s.items_sold,'Revenue':parseFloat(s.total_revenue||0).toFixed(2)})) });
+    if (categories.length)   sheets.push({ name: 'Categories',         data: categories.map(c=>({'Category':c.name,'Share (%)':c.value,'Revenue':c.revenue||''})) });
+    if (sellersPay.length)   sheets.push({ name: 'Payments by Seller', data: sellersPay.map(s=>({'Seller':s.seller_name,'GCash Orders':s.gcash_orders,'GCash Rev':s.gcash_revenue,'PayPal Orders':s.paypal_orders,'PayPal Rev':s.paypal_revenue,'COD Orders':s.cod_orders||0,'COD Rev':s.cod_revenue||0,'Total':s.total_revenue})) });
+    if (transactions.length) sheets.push({ name: 'Transactions',       data: transactions.map(t=>({'Order#':t.order_number,'Amount':t.total_amount,'Method':t.payment_method,'Status':t.payment_status,'Date':new Date(t.order_date).toLocaleDateString()})) });
     await exportToExcel(sheets, `full_report_${start}_${end}.xlsx`);
   };
 
-  const st = summary || {};
-  const chartLabel = groupBy==='week' ? 'label' : 'month';
+  const st         = summary || {};
+  const chartLabel = groupBy === 'week' ? 'label' : 'month';
 
-  // Filtered orders for the orders table
+  const grossRevenue = parseFloat(st.grossRevenue || 0);
+  const netRevenue   = parseFloat(st.totalRevenue  || 0);
+
+  const metricColor  = metric === 'orders' ? '#8b5cf6' : metric === 'commission' ? '#f59e0b' : '#3b82f6';
+  const metricPrefix = metric === 'orders' ? '' : '₱';
+  const metricTitle  = metric === 'gross_revenue' ? 'Gross Revenue' : metric === 'revenue' ? 'Net Revenue' : metric === 'commission' ? 'Commission' : 'Orders';
+
+  const bdMap = {};
+  payBreakdown.forEach(r => { bdMap[r.method?.toUpperCase()] = r; });
+
+  // ✅ FIX 2: Compute payment card totals from sellersPay (authoritative per-seller source)
+  // sellersPay sums subtotal+shipping per seller correctly; payBreakdown uses total_amount once per order
+  const payCardTotals = (() => {
+    if (sellersPay.length === 0) {
+      // Fallback to bdMap or summary stats if sellersPay not loaded yet
+      return {
+        gcash:  { orders: Number(bdMap['GCASH']?.orders  || st.gcashOrders  || 0), revenue: parseFloat(bdMap['GCASH']?.revenue  || st.gcashRevenue  || 0) },
+        paypal: { orders: Number(bdMap['PAYPAL']?.orders || st.paypalOrders || 0), revenue: parseFloat(bdMap['PAYPAL']?.revenue || st.paypalRevenue || 0) },
+        cod:    { orders: Number(bdMap['COD']?.orders    || st.codOrders    || 0), revenue: parseFloat(bdMap['COD']?.revenue    || st.codRevenue    || 0) },
+      };
+    }
+    // Sum across all sellers — this matches the By Seller table exactly
+    const gcashOrders  = sellersPay.reduce((s, sv) => s + (Number(sv.gcash_orders)  || 0), 0);
+    const paypalOrders = sellersPay.reduce((s, sv) => s + (Number(sv.paypal_orders) || 0), 0);
+    const codOrders    = sellersPay.reduce((s, sv) => s + (Number(sv.cod_orders)    || 0), 0);
+    const gcashRev     = sellersPay.reduce((s, sv) => s + (parseFloat(sv.gcash_revenue)  || 0), 0);
+    const paypalRev    = sellersPay.reduce((s, sv) => s + (parseFloat(sv.paypal_revenue) || 0), 0);
+    const codRev       = sellersPay.reduce((s, sv) => s + (parseFloat(sv.cod_revenue)    || 0), 0);
+    return {
+      gcash:  { orders: gcashOrders,  revenue: gcashRev  },
+      paypal: { orders: paypalOrders, revenue: paypalRev },
+      cod:    { orders: codOrders,    revenue: codRev    },
+    };
+  })();
+
   const filteredOrders = orders.filter(o => {
     const matchSearch = !ordersSearch ||
       o.order_number?.toLowerCase().includes(ordersSearch.toLowerCase()) ||
       o.shipping_full_name?.toLowerCase().includes(ordersSearch.toLowerCase()) ||
       o.shipping_email?.toLowerCase().includes(ordersSearch.toLowerCase());
-    const matchStatus = ordersStatusF   === 'all' || o.order_status   === ordersStatusF;
-    const matchPay    = ordersPayF      === 'all' || o.payment_method === ordersPayF;
-    const matchSeller = ordersSellerF   === 'all' || o.seller_id      === ordersSellerF ||
-                        o.sellers?.some?.(s => s.id === ordersSellerF);
+    const matchStatus = ordersStatusF === 'all' || o.order_status   === ordersStatusF;
+    const matchPay    = ordersPayF    === 'all' || o.payment_method === ordersPayF;
+    const matchSeller = ordersSellerF === 'all' || o.seller_id      === ordersSellerF ||
+                        o.sellers?.some?.(sv => sv.id === ordersSellerF);
     return matchSearch && matchStatus && matchPay && matchSeller;
   });
   const sortedOrders = sortOrders(filteredOrders);
-  const years = [new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2];
+  const years        = [new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2];
 
-  // Filtered transactions for payment tab
   const filteredTransactions = transactions.filter(t => {
     const matchMethod = txnMethodF === 'all' || t.payment_method?.toLowerCase() === txnMethodF;
     const matchStatus = txnStatusF === 'all' || t.order_status?.toLowerCase() === txnStatusF ||
                         (txnStatusF === 'cancelled' && ['cancelled','canceled'].includes(t.order_status?.toLowerCase()));
-    const matchSearch = !txnSearch ||
-      t.order_number?.toLowerCase().includes(txnSearch.toLowerCase());
+    const matchSearch = !txnSearch || t.order_number?.toLowerCase().includes(txnSearch.toLowerCase());
     return matchMethod && matchStatus && matchSearch;
   });
 
-  // Filtered sellers for payment tab
   const filteredSellersPay = sellersPay.filter(s =>
     !sellerSearch ||
     s.seller_name?.toLowerCase().includes(sellerSearch.toLowerCase()) ||
@@ -800,17 +1091,10 @@ const AdminReports = () => {
     { k:'products',  l:'Products & Sellers' },
     { k:'financial', l:'Financial'          },
     { k:'payments',  l:'Payments'           },
-    { k:'logs',      l:'Activity Logs'      },
   ];
-
-  // Fetch logs when switching to the logs tab
-  useEffect(() => {
-    if (activeTab === 'logs') fetchLogs(logCategory, logRole, 0);
-  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
@@ -840,7 +1124,6 @@ const AdminReports = () => {
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800">{error}</div>
       )}
 
-      {/* Tabs */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6 overflow-hidden">
         <div className="flex overflow-x-auto">
           {TABS.map(t => (
@@ -856,17 +1139,15 @@ const AdminReports = () => {
       {/* ══ OVERVIEW TAB ══════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Total Revenue"     value={currency(st.totalRevenue)}    sub={`${st.totalOrders||0} delivered orders`}   icon="₱" color="blue"   badge={st.revenueGrowth}/>
-            <StatCard label="Platform Fees"     value={currency(st.systemCommission)} sub="10% of subtotal collected"                icon="%" color="amber"  />
-            <StatCard label="Products Sold"     value={num(st.productsSold)}          sub="Items delivered"                          icon="📦" color="purple"/>
-            <StatCard label="Avg Order Value"   value={currency(st.avgOrderValue)}    sub="Per delivered order"                      icon="📊" color="green" />
+            <StatCard label="Gross Revenue" value={currency(grossRevenue)} sub={`${st.deliveredOrders||0} delivered orders`} icon="₱" color="blue" badge={st.revenueGrowth}/>
+            <StatCard label="Net Revenue"   value={currency(netRevenue)}   sub="After approved refunds" icon="✅" color="green"/>
+            <StatCard label="Platform Fees" value={currency(st.systemCommission)} sub="10% of subtotal collected" icon="%" color="amber"/>
+            <StatCard label="Products Sold" value={num(st.productsSold)}          sub="Items delivered"           icon="📦" color="purple"/>
           </div>
 
-          {/* Revenue over time */}
           <Card>
-            <CardHeader title="Revenue Over Time" sub={groupBy==='month'?`Monthly · ${year}`: `Weekly · ${start} → ${end}`}>
+            <CardHeader title={`${metricTitle} Over Time`} sub={groupBy==='month'?`Monthly · ${year}`:`Weekly · ${start} → ${end}`}>
               <div className="flex flex-wrap gap-2">
                 <div className="flex bg-gray-100 rounded-lg p-0.5">
                   {['month','week'].map(g=>(
@@ -884,7 +1165,8 @@ const AdminReports = () => {
                 )}
                 <select value={metric} onChange={e=>setMetric(e.target.value)}
                   className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-                  <option value="revenue">Revenue</option>
+                  <option value="gross_revenue">Gross Revenue</option>
+                  <option value="revenue">Net Revenue</option>
                   <option value="commission">Commission</option>
                   <option value="orders">Orders</option>
                 </select>
@@ -893,28 +1175,22 @@ const AdminReports = () => {
             </CardHeader>
             <div className="p-6">
               {salesData.length>0
-                ? <BarChart data={salesData} valueKey={metric} labelKey={chartLabel} color={metric==='orders'?'#8b5cf6':'#3b82f6'} prefix={metric==='orders'?'':'₱'}/>
+                ? <BarChart data={salesData} valueKey={metric} labelKey={chartLabel} color={metricColor} prefix={metricPrefix}/>
                 : <p className="text-center text-gray-400 py-10 text-sm">No data for this period</p>}
             </div>
           </Card>
 
-          {/* Categories */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader title="Sales by Category" sub="% of delivered items sold"/>
               <div className="p-6">
-                {categories.length>0
-                  ? <DonutChart data={categories}/>
-                  : <p className="text-center text-gray-400 py-10 text-sm">No category data</p>}
+                {categories.length>0 ? <DonutChart data={categories}/> : <p className="text-center text-gray-400 py-10 text-sm">No category data</p>}
               </div>
             </Card>
-
             <Card>
               <CardHeader title="Order Status" sub="All orders this period"/>
               <div className="p-6">
-                {orderStatus.length>0
-                  ? <StatusFunnel data={orderStatus}/>
-                  : <p className="text-center text-gray-400 py-10 text-sm">No order data</p>}
+                {orderStatus.length>0 ? <StatusFunnel data={orderStatus}/> : <p className="text-center text-gray-400 py-10 text-sm">No order data</p>}
               </div>
             </Card>
           </div>
@@ -924,7 +1200,6 @@ const AdminReports = () => {
       {/* ══ ORDERS TAB ════════════════════════════════════════════════════════ */}
       {activeTab === 'orders' && (
         <div className="space-y-6">
-          {/* Status summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
               { label:'Pending',    key:'pendingOrders',    icon:'⏳', color:'amber'  },
@@ -937,9 +1212,10 @@ const AdminReports = () => {
             ))}
           </div>
 
-          {/* Status chart */}
           <Card>
-            <CardHeader title="Orders by Status" sub="Count and revenue per status"><ExportGroup onExcel={()=>exportOrderStatus('excel')} onCSV={()=>exportOrderStatus('csv')}/></CardHeader>
+            <CardHeader title="Orders by Status" sub="Count and revenue per status">
+              <ExportGroup onExcel={()=>exportOrderStatus('excel')} onCSV={()=>exportOrderStatus('csv')}/>
+            </CardHeader>
             <div className="p-6">
               {orderStatus.length>0 ? (
                 <>
@@ -974,7 +1250,6 @@ const AdminReports = () => {
             </div>
           </Card>
 
-          {/* Cancellations impact */}
           <Card>
             <CardHeader title="Cancellations Impact" sub="Revenue and fees lost from cancelled orders"/>
             <div className="p-6">
@@ -992,7 +1267,6 @@ const AdminReports = () => {
                   <p className="text-3xl font-bold text-amber-700">{currency(st.cancelledFees||0)}</p>
                 </div>
               </div>
-              {/* Cancellation rate */}
               {(() => {
                 const total = (st.totalOrders||0) + (st.cancelledOrders||0);
                 const rate  = total>0 ? ((st.cancelledOrders||0)/total*100).toFixed(1) : 0;
@@ -1002,16 +1276,13 @@ const AdminReports = () => {
                       <p className="text-sm font-semibold text-gray-700">Cancellation Rate</p>
                       <p className="text-xs text-gray-400">Cancelled / Total Orders</p>
                     </div>
-                    <span className={`text-2xl font-bold ${parseFloat(rate)>10?'text-red-600':parseFloat(rate)>5?'text-amber-600':'text-green-600'}`}>
-                      {rate}%
-                    </span>
+                    <span className={`text-2xl font-bold ${parseFloat(rate)>10?'text-red-600':parseFloat(rate)>5?'text-amber-600':'text-green-600'}`}>{rate}%</span>
                   </div>
                 );
               })()}
             </div>
           </Card>
 
-          {/* Avg order value */}
           <Card>
             <CardHeader title="Average Order Value" sub="Per delivered order this period"/>
             <div className="p-6">
@@ -1019,31 +1290,26 @@ const AdminReports = () => {
                 <div className="text-center">
                   <p className="text-5xl font-bold text-blue-600 mb-2">{currency(st.avgOrderValue||0)}</p>
                   <p className="text-sm text-gray-500">Average order value · {num(st.deliveredOrders||0)} delivered orders</p>
-                  <p className="text-xs text-gray-400 mt-1">Total Revenue {currency(st.totalRevenue||0)} ÷ {num(st.deliveredOrders||0)} orders</p>
+                  <p className="text-xs text-gray-400 mt-1">Net Revenue {currency(netRevenue)} ÷ {num(st.deliveredOrders||0)} orders</p>
                 </div>
               </div>
             </div>
           </Card>
 
-          {/* ── All Orders Table ── */}
           <Card>
             <CardHeader title="All Orders" sub={`${filteredOrders.length} orders matching filters`}>
               <ExportGroup onExcel={()=>exportOrders('excel')} onCSV={()=>exportOrders('csv')}/>
             </CardHeader>
             <div className="p-4 border-b border-gray-100 space-y-3">
-              {/* Row 1: Search */}
               <div className="relative">
                 <svg className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-                <input type="text"
-                  placeholder="Search by order #, customer name, or email..."
+                <input type="text" placeholder="Search by order #, customer name, or email..."
                   value={ordersSearch} onChange={e=>setOrdersSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
               </div>
-              {/* Row 2: Dropdowns */}
               <div className="flex flex-wrap gap-2 items-center">
-                {/* Order Status */}
                 <select value={ordersStatusF} onChange={e=>setOrdersStatusF(e.target.value)}
                   className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
                   <option value="all">All Statuses</option>
@@ -1053,7 +1319,6 @@ const AdminReports = () => {
                   <option value="delivered">Delivered</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
-                {/* Payment Method */}
                 <select value={ordersPayF} onChange={e=>setOrdersPayF(e.target.value)}
                   className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
                   <option value="all">All Payments</option>
@@ -1061,21 +1326,16 @@ const AdminReports = () => {
                   <option value="paypal">PayPal</option>
                   <option value="cod">COD</option>
                 </select>
-                {/* Seller Filter — populated from order data */}
                 <select value={ordersSellerF} onChange={e=>setOrdersSellerF(e.target.value)}
                   className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600 max-w-[200px]">
                   <option value="all">All Sellers</option>
-                  {sellerList.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
+                  {sellerList.map(s=>(<option key={s.id} value={s.id}>{s.name}</option>))}
                 </select>
-                {/* Active filters summary */}
                 <div className="ml-auto flex items-center gap-2">
-                  {(ordersSearch || ordersStatusF !== 'all' || ordersPayF !== 'all' || ordersSellerF !== 'all') && (
+                  {(ordersSearch||ordersStatusF!=='all'||ordersPayF!=='all'||ordersSellerF!=='all') && (
                     <>
-                      <span className="text-xs text-gray-500">{filteredOrders.length} result{filteredOrders.length !== 1 ? 's' : ''}</span>
-                      <button
-                        onClick={() => { setOrdersSearch(''); setOrdersStatusF('all'); setOrdersPayF('all'); setOrdersSellerF('all'); }}
+                      <span className="text-xs text-gray-500">{filteredOrders.length} result{filteredOrders.length!==1?'s':''}</span>
+                      <button onClick={()=>{setOrdersSearch('');setOrdersStatusF('all');setOrdersPayF('all');setOrdersSellerF('all');}}
                         className="text-xs px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition">
                         Clear all filters
                       </button>
@@ -1083,25 +1343,21 @@ const AdminReports = () => {
                   )}
                 </div>
               </div>
-              {/* Active filter chips */}
-              {(ordersStatusF !== 'all' || ordersPayF !== 'all' || ordersSellerF !== 'all') && (
+              {(ordersStatusF!=='all'||ordersPayF!=='all'||ordersSellerF!=='all') && (
                 <div className="flex flex-wrap gap-1.5">
-                  {ordersStatusF !== 'all' && (
+                  {ordersStatusF!=='all' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">
-                      Status: {ordersStatusF}
-                      <button onClick={()=>setOrdersStatusF('all')} className="hover:text-blue-900 ml-0.5">×</button>
+                      Status: {ordersStatusF}<button onClick={()=>setOrdersStatusF('all')} className="hover:text-blue-900 ml-0.5">×</button>
                     </span>
                   )}
-                  {ordersPayF !== 'all' && (
+                  {ordersPayF!=='all' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full border border-purple-200">
-                      Payment: {ordersPayF.toUpperCase()}
-                      <button onClick={()=>setOrdersPayF('all')} className="hover:text-purple-900 ml-0.5">×</button>
+                      Payment: {ordersPayF.toUpperCase()}<button onClick={()=>setOrdersPayF('all')} className="hover:text-purple-900 ml-0.5">×</button>
                     </span>
                   )}
-                  {ordersSellerF !== 'all' && (
+                  {ordersSellerF!=='all' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full border border-green-200">
-                      Seller: {sellerList.find(s=>s.id===ordersSellerF)?.name || ordersSellerF}
-                      <button onClick={()=>setOrdersSellerF('all')} className="hover:text-green-900 ml-0.5">×</button>
+                      Seller: {sellerList.find(s=>s.id===ordersSellerF)?.name||ordersSellerF}<button onClick={()=>setOrdersSellerF('all')} className="hover:text-green-900 ml-0.5">×</button>
                     </span>
                   )}
                 </div>
@@ -1110,172 +1366,79 @@ const AdminReports = () => {
             <div className="overflow-x-auto">
               {filteredOrders.length === 0 ? (
                 <div className="text-center py-12">
-                  <p className="text-gray-400 text-sm">{orders.length === 0 ? 'No orders data — date range may be outside available records' : 'No orders match your filters'}</p>
+                  <p className="text-gray-400 text-sm">{orders.length===0?'No orders data — date range may be outside available records':'No orders match your filters'}</p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b-2 border-gray-200">
                     <tr>
-                      <th onClick={() => toggleOrdersSort('order_number')}
-                        className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center gap-1">
-                          Order #
-                          {ordersSortKey === 'order_number' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('order_date')}
-                        className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center gap-1">
-                          Date
-                          {ordersSortKey === 'order_date' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('customer')}
-                        className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center gap-1">
-                          Customer
-                          {ordersSortKey === 'customer' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('status')}
-                        className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center justify-center gap-1">
-                          Status
-                          {ordersSortKey === 'status' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('payment')}
-                        className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center justify-center gap-1">
-                          Payment
-                          {ordersSortKey === 'payment' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('total')}
-                        className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center justify-end gap-1">
-                          Total
-                          {ordersSortKey === 'total' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('seller')}
-                        className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center gap-1">
-                          Seller
-                          {ordersSortKey === 'seller' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
-                      <th onClick={() => toggleOrdersSort('refund')}
-                        className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none">
-                        <div className="flex items-center justify-center gap-1">
-                          Refund
-                          {ordersSortKey === 'refund' && (
-                            <span className="text-[10px]">{ordersSortDir === 'asc' ? '▲' : '▼'}</span>
-                          )}
-                        </div>
-                      </th>
+                      {[
+                        {k:'order_number',l:'Order #',  align:'left'  },
+                        {k:'order_date',  l:'Date',     align:'left'  },
+                        {k:'customer',    l:'Customer', align:'left'  },
+                        {k:'status',      l:'Status',   align:'center'},
+                        {k:'payment',     l:'Payment',  align:'center'},
+                        {k:'total',       l:'Total',    align:'right' },
+                        {k:'seller',      l:'Seller',   align:'left'  },
+                        {k:'refund',      l:'Refund',   align:'center'},
+                      ].map(({k,l,align})=>(
+                        <th key={k} onClick={()=>toggleOrdersSort(k)}
+                          className={`px-4 py-3 text-${align} text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none`}>
+                          <div className={`flex items-center gap-1 ${align==='right'?'justify-end':align==='center'?'justify-center':''}`}>
+                            {l}{ordersSortKey===k&&<span className="text-[10px]">{ordersSortDir==='asc'?'▲':'▼'}</span>}
+                          </div>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {sortedOrders.slice(0, 100).map((o, i) => {
+                    {sortedOrders.slice(0,100).map((o,i) => {
                       const refund = refundMap[o.id];
-                      const refundColors = {
-                        seller_pending: 'bg-blue-100 text-blue-800',
-                        pending:        'bg-amber-100 text-amber-800',
-                        approved:       'bg-green-100 text-green-800',
-                        rejected:       'bg-red-100 text-red-800',
-                      };
-                      const orderStatusColors = {
-                        pending:    'bg-amber-100 text-amber-800',
-                        processing: 'bg-blue-100 text-blue-800',
-                        shipped:    'bg-purple-100 text-purple-800',
-                        delivered:  'bg-green-100 text-green-800',
-                        cancelled:  'bg-red-100 text-red-800',
-                      };
-                      const payColors = {
-                        gcash:  'bg-blue-100 text-blue-800',
-                        paypal: 'bg-indigo-100 text-indigo-800',
-                        cod:    'bg-amber-100 text-amber-800',
-                      };
+                      const refundColors      = {seller_pending:'bg-blue-100 text-blue-800',pending:'bg-amber-100 text-amber-800',approved:'bg-green-100 text-green-800',rejected:'bg-red-100 text-red-800'};
+                      const orderStatusColors = {pending:'bg-amber-100 text-amber-800',processing:'bg-blue-100 text-blue-800',shipped:'bg-purple-100 text-purple-800',delivered:'bg-green-100 text-green-800',cancelled:'bg-red-100 text-red-800'};
+                      const payColors         = {gcash:'bg-blue-100 text-blue-800',paypal:'bg-indigo-100 text-indigo-800',cod:'bg-amber-100 text-amber-800'};
                       return (
-                        <tr key={o.id || i}
-                          className={`hover:bg-gray-50 transition ${
-                            refund?.status === 'pending' ? 'bg-amber-50/30' :
-                            refund?.status === 'approved' ? 'bg-green-50/20' : ''
-                          }`}>
+                        <tr key={o.id||i} className={`hover:bg-gray-50 transition ${refund?.status==='pending'?'bg-amber-50/30':refund?.status==='approved'?'bg-green-50/20':''}`}>
+                          <td className="px-4 py-3"><p className="font-mono text-xs font-semibold text-gray-900">{o.order_number}</p></td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{new Date(o.order_date).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</td>
                           <td className="px-4 py-3">
-                            <p className="font-mono text-xs font-semibold text-gray-900">{o.order_number}</p>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                            {new Date(o.order_date).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' })}
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="text-sm font-medium text-gray-900 truncate max-w-[140px]">{o.shipping_full_name || '—'}</p>
-                            <p className="text-xs text-gray-400 truncate max-w-[140px]">{o.shipping_email || ''}</p>
+                            <p className="text-sm font-medium text-gray-900 truncate max-w-[140px]">{o.shipping_full_name||'—'}</p>
+                            <p className="text-xs text-gray-400 truncate max-w-[140px]">{o.shipping_email||''}</p>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${orderStatusColors[o.order_status] || 'bg-gray-100 text-gray-700'}`}>
-                              {o.order_status?.charAt(0).toUpperCase() + o.order_status?.slice(1)}
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${orderStatusColors[o.order_status]||'bg-gray-100 text-gray-700'}`}>
+                              {o.order_status?.charAt(0).toUpperCase()+o.order_status?.slice(1)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${payColors[o.payment_method] || 'bg-gray-100 text-gray-700'}`}>
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${payColors[o.payment_method]||'bg-gray-100 text-gray-700'}`}>
                               {o.payment_method?.toUpperCase()}
                             </span>
-                            <p className={`text-[10px] mt-0.5 ${o.payment_status === 'paid' ? 'text-green-600' : 'text-amber-600'}`}>
-                              {o.payment_status}
-                            </p>
+                            <p className={`text-[10px] mt-0.5 ${o.payment_status==='paid'?'text-green-600':'text-amber-600'}`}>{o.payment_status}</p>
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            <p className="font-semibold text-gray-900 text-sm">{currency(o.total_amount)}</p>
-                          </td>
+                          <td className="px-4 py-3 text-right"><p className="font-semibold text-gray-900 text-sm">{currency(o.total_amount)}</p></td>
                           <td className="px-4 py-3">
-                            {o.sellers && o.sellers.length > 0 ? (
+                            {o.sellers&&o.sellers.length>0 ? (
                               <div>
-                                {o.sellers.slice(0, 2).map((s, si) => (
-                                  <p key={si}
-                                    className={`text-xs truncate max-w-[130px] cursor-pointer ${ordersSellerF === s.id ? 'font-bold text-blue-700' : 'text-gray-700 hover:text-blue-600'}`}
-                                    onClick={() => setOrdersSellerF(ordersSellerF === s.id ? 'all' : s.id)}
-                                    title={`Filter by ${s.name}`}>
-                                    {s.name}
+                                {o.sellers.slice(0,2).map((sv,si)=>(
+                                  <p key={si} className={`text-xs truncate max-w-[130px] cursor-pointer ${ordersSellerF===sv.id?'font-bold text-blue-700':'text-gray-700 hover:text-blue-600'}`}
+                                    onClick={()=>setOrdersSellerF(ordersSellerF===sv.id?'all':sv.id)}>
+                                    {sv.name}
                                   </p>
                                 ))}
-                                {o.sellers.length > 2 && (
-                                  <p className="text-[10px] text-gray-400">+{o.sellers.length - 2} more</p>
-                                )}
+                                {o.sellers.length>2&&<p className="text-[10px] text-gray-400">+{o.sellers.length-2} more</p>}
                               </div>
-                            ) : (
-                              <span className="text-xs text-gray-400">—</span>
-                            )}
+                            ) : <span className="text-xs text-gray-400">—</span>}
                           </td>
                           <td className="px-4 py-3 text-center">
                             {refund ? (
                               <div>
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${refundColors[refund.status] || 'bg-gray-100 text-gray-700'}`}>
-                                  {refund.status === 'seller_pending' ? 'With Seller' :
-                                   refund.status === 'pending'        ? 'Pending'     :
-                                   refund.status === 'approved'       ? 'Approved'    :
-                                   refund.status === 'rejected'       ? 'Rejected'    : refund.status}
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${refundColors[refund.status]||'bg-gray-100 text-gray-700'}`}>
+                                  {refund.status==='seller_pending'?'With Seller':refund.status==='pending'?'Pending':refund.status==='approved'?'Approved':'Rejected'}
                                 </span>
                                 <p className="text-[10px] text-gray-500 mt-0.5">{currency(refund.refund_amount)}</p>
                               </div>
-                            ) : (
-                              <span className="text-[10px] text-gray-300">—</span>
-                            )}
+                            ) : <span className="text-[10px] text-gray-300">—</span>}
                           </td>
                         </tr>
                       );
@@ -1295,124 +1458,26 @@ const AdminReports = () => {
 
       {/* ══ PRODUCTS & SELLERS TAB ════════════════════════════════════════════ */}
       {activeTab === 'products' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Top Products */}
-            <Card>
-              <CardHeader title="Best Selling Products" sub="By revenue · delivered orders"><ExportGroup onExcel={()=>exportProducts('excel')} onCSV={()=>exportProducts('csv')}/></CardHeader>
-              <div className="p-6">
-                {topProducts.length>0 ? (
-                  <>
-                    {topProducts.slice(0,8).map((p,i)=>(
-                      <HBar key={i} label={`${i+1}. ${p.name}`}
-                        value={parseFloat(p.revenue)}
-                        max={parseFloat(topProducts[0].revenue)}
-                        color="#3b82f6" prefix="₱"/>
-                    ))}
-                    <div className="mt-4 overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b border-gray-100">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">#</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Product</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Units</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Revenue</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {topProducts.map((p,i)=>(
-                            <tr key={i} className="hover:bg-gray-50">
-                              <td className="px-3 py-2 text-xs text-gray-400">{i+1}</td>
-                              <td className="px-3 py-2 text-sm text-gray-800 font-medium truncate max-w-[150px]">{p.name}</td>
-                              <td className="px-3 py-2 text-right text-sm text-gray-600">{num(p.sales)}</td>
-                              <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900">{currency(p.revenue)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : <p className="text-center text-gray-400 py-10 text-sm">No product data</p>}
-              </div>
-            </Card>
-
-            {/* Top Sellers */}
-            <Card>
-              <CardHeader title="Top Sellers / Stores" sub="By revenue · delivered orders"><ExportGroup onExcel={()=>exportSellers('excel')} onCSV={()=>exportSellers('csv')}/></CardHeader>
-              <div className="p-6">
-                {topSellers.length>0 ? (
-                  <>
-                    {topSellers.slice(0,8).map((s,i)=>(
-                      <HBar key={i} label={`${i+1}. ${s.seller_name}`}
-                        value={parseFloat(s.total_revenue)}
-                        max={parseFloat(topSellers[0].total_revenue)}
-                        color="#10b981" prefix="₱"/>
-                    ))}
-                    <div className="mt-4 overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b border-gray-100">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Seller</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Orders</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Items</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Revenue</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {topSellers.map((s,i)=>(
-                            <tr key={i} className="hover:bg-gray-50">
-                              <td className="px-3 py-2">
-                                <p className="text-sm font-medium text-gray-800 truncate max-w-[140px]">{s.seller_name}</p>
-                                <p className="text-xs text-gray-400">{s.seller_email}</p>
-                              </td>
-                              <td className="px-3 py-2 text-right text-sm text-gray-600">{num(s.total_orders)}</td>
-                              <td className="px-3 py-2 text-right text-sm text-gray-600">{num(s.items_sold)}</td>
-                              <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900">{currency(s.total_revenue)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : <p className="text-center text-gray-400 py-10 text-sm">No seller data</p>}
-              </div>
-            </Card>
-          </div>
-
-          {/* Category breakdown */}
-          <Card>
-            <CardHeader title="Sales by Category" sub="Revenue share from delivered orders"/>
-            <div className="p-6">
-              {categories.length>0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-                  <DonutChart data={categories}/>
-                  <div>
-                    {categories.map((c,i)=>(
-                      <HBar key={i} label={c.name} value={c.value} max={100} color={c.color} suffix="%" bold/>
-                    ))}
-                  </div>
-                </div>
-              ) : <p className="text-center text-gray-400 py-10 text-sm">No category data</p>}
-            </div>
-          </Card>
-        </div>
+        <ProductsTab
+          start={start} end={end}
+          topProducts={topProducts} topSellers={topSellers} categories={categories}
+          exportProducts={exportProducts} exportSellers={exportSellers}
+          apiBase={API_BASE_URL} token={token}
+        />
       )}
 
       {/* ══ FINANCIAL TAB ═════════════════════════════════════════════════════ */}
       {activeTab === 'financial' && (
         <div className="space-y-6">
-          {/* Revenue breakdown cards */}
-          {/* Top-level financial summary */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Gross Revenue"      value={currency(st.totalRevenue)}    sub="Before refunds"         icon="₱"  color="blue"   badge={st.revenueGrowth}/>
-            <StatCard label="Total Refunded"     value={currency(parseFloat(refundStats?.total_refunded||0))} sub={`${(refundStats?.approved||0)} approved · delivered orders only`} icon="↩" color="red"/>
-            <StatCard label="Net Revenue"        value={currency(Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(parseFloat(refundStats?.total_refunded||0))))} sub="After refunds" icon="✅" color="green"/>
-            <StatCard label="Platform Fees"      value={currency(st.systemCommission)} sub="10% of subtotal"      icon="%" color="amber"  />
+            <StatCard label="Gross Revenue"  value={currency(grossRevenue)} sub="Delivered · before refunds" icon="₱" color="blue" badge={st.revenueGrowth}/>
+            <StatCard label="Total Refunded" value={currency(parseFloat(st.totalRefunded||0))} sub="Date-range refunds only" icon="↩" color="red"/>
+            <StatCard label="Net Revenue"    value={currency(netRevenue)} sub="Gross minus refunds" icon="✅" color="green"/>
+            <StatCard label="Platform Fees"  value={currency(st.systemCommission)} sub="10% of subtotal (net)" icon="%" color="amber"/>
           </div>
 
-          {/* Revenue chart */}
           <Card>
-            <CardHeader title="Revenue Over Time" sub="Platform-wide revenue from delivered orders">
+            <CardHeader title="Revenue Over Time" sub="Platform-wide gross revenue from delivered orders">
               <div className="flex gap-2">
                 <div className="flex bg-gray-100 rounded-lg p-0.5">
                   {['month','week'].map(g=>(
@@ -1432,12 +1497,11 @@ const AdminReports = () => {
             </CardHeader>
             <div className="p-6">
               {salesData.length>0
-                ? <BarChart data={salesData} valueKey="revenue" labelKey={chartLabel} color="#3b82f6" prefix="₱"/>
+                ? <BarChart data={salesData} valueKey="gross_revenue" labelKey={chartLabel} color="#3b82f6" prefix="₱"/>
                 : <p className="text-center text-gray-400 py-10 text-sm">No data</p>}
             </div>
           </Card>
 
-          {/* Commission chart */}
           <Card>
             <CardHeader title="Platform Commission Over Time" sub="10% fee collected per delivered order"/>
             <div className="p-6">
@@ -1447,12 +1511,9 @@ const AdminReports = () => {
             </div>
           </Card>
 
-          {/* Revenue breakdown table */}
           <Card>
             <CardHeader title="Revenue Breakdown" sub="Where the money comes from">
-              <div className="flex items-center gap-2">
-                <ExportGroup onExcel={()=>exportFinancial('excel')} onCSV={()=>exportFinancial('csv')}/>
-              </div>
+              <ExportGroup onExcel={()=>exportFinancial('excel')} onCSV={()=>exportFinancial('csv')}/>
             </CardHeader>
             <div className="p-6">
               <table className="w-full text-sm">
@@ -1460,7 +1521,7 @@ const AdminReports = () => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Component</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">% of Total</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">% of Gross</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1469,8 +1530,7 @@ const AdminReports = () => {
                     { label: 'Platform Fee (10%)',                val: st.systemCommission, color:'#f59e0b' },
                     { label: 'Shipping Fee',                      val: st.shippingRevenue,  color:'#8b5cf6' },
                   ].map((row,i)=>{
-                    const total = parseFloat(st.totalRevenue)||1;
-                    const pct   = ((parseFloat(row.val)||0)/total*100).toFixed(1);
+                    const pct = grossRevenue > 0 ? ((parseFloat(row.val)||0) / grossRevenue * 100).toFixed(1) : '0.0';
                     return (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-4 py-3 flex items-center gap-2">
@@ -1484,7 +1544,7 @@ const AdminReports = () => {
                   })}
                   <tr className="bg-blue-50">
                     <td className="px-4 py-3 font-bold text-blue-900">Gross Revenue</td>
-                    <td className="px-4 py-3 text-right font-bold text-blue-900">{currency(st.totalRevenue||0)}</td>
+                    <td className="px-4 py-3 text-right font-bold text-blue-900">{currency(grossRevenue)}</td>
                     <td className="px-4 py-3 text-right font-bold text-blue-900">100%</td>
                   </tr>
                   <tr className="bg-red-50">
@@ -1492,18 +1552,16 @@ const AdminReports = () => {
                       <div className="w-3 h-3 rounded-full flex-shrink-0 bg-red-400"/>
                       <span className="text-red-700 font-medium">Refunds Issued</span>
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-red-700">- {currency(parseFloat(refundStats?.total_refunded||0))}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-red-700">- {currency(parseFloat(st.totalRefunded||0))}</td>
                     <td className="px-4 py-3 text-right text-red-500">
-                      {parseFloat(st.totalRevenue||0)>0?((parseFloat(parseFloat(refundStats?.total_refunded||0))/parseFloat(st.totalRevenue||1))*100).toFixed(1):0}%
+                      {grossRevenue>0?((parseFloat(st.totalRefunded||0)/grossRevenue)*100).toFixed(1):0}%
                     </td>
                   </tr>
                   <tr className="bg-green-50">
                     <td className="px-4 py-3 font-bold text-green-900">Net Revenue</td>
+                    <td className="px-4 py-3 text-right font-bold text-green-900">{currency(netRevenue)}</td>
                     <td className="px-4 py-3 text-right font-bold text-green-900">
-                      {currency(Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(parseFloat(refundStats?.total_refunded||0))))}
-                    </td>
-                    <td className="px-4 py-3 text-right font-bold text-green-900">
-                      {parseFloat(st.totalRevenue||0)>0?(((parseFloat(st.totalRevenue||0)-parseFloat(parseFloat(refundStats?.total_refunded||0)))/parseFloat(st.totalRevenue||1))*100).toFixed(1):100}%
+                      {grossRevenue>0?((netRevenue/grossRevenue)*100).toFixed(1):100}%
                     </td>
                   </tr>
                 </tbody>
@@ -1511,7 +1569,6 @@ const AdminReports = () => {
             </div>
           </Card>
 
-          {/* Refunds financial impact */}
           <Card>
             <CardHeader title="Refunds Impact" sub="Money returned to customers after delivery">
               <ExportGroup onExcel={()=>exportFinancial('excel')} onCSV={()=>exportFinancial('csv')}/>
@@ -1520,36 +1577,28 @@ const AdminReports = () => {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div className="bg-red-50 border border-red-100 rounded-xl p-5 text-center">
                   <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Total Refunded</p>
-                  <p className="text-3xl font-bold text-red-700">{currency(parseFloat(refundStats?.total_refunded||0))}</p>
-                  <p className="text-xs text-red-400 mt-1">{(refundStats?.approved||0)} approved refunds</p>
+                  <p className="text-3xl font-bold text-red-700">{currency(parseFloat(st.totalRefunded||0))}</p>
+                  <p className="text-xs text-red-400 mt-1">Delivered approved refunds</p>
                 </div>
                 <div className="bg-amber-50 border border-amber-100 rounded-xl p-5 text-center">
                   <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-2">Pending Review</p>
-                  <p className="text-3xl font-bold text-amber-700">{(refundStats?.pending||0)}</p>
+                  <p className="text-3xl font-bold text-amber-700">{refundStats?.pending||0}</p>
                   <p className="text-xs text-amber-500 mt-1">awaiting admin decision</p>
                 </div>
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 text-center">
                   <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">With Seller (COD)</p>
-                  <p className="text-3xl font-bold text-blue-700">{(refundStats?.seller_pending||0)}</p>
+                  <p className="text-3xl font-bold text-blue-700">{refundStats?.seller_pending||0}</p>
                   <p className="text-xs text-blue-500 mt-1">awaiting seller confirmation</p>
                 </div>
                 <div className="bg-green-50 border border-green-100 rounded-xl p-5 text-center">
                   <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-2">Net Revenue</p>
-                  <p className="text-3xl font-bold text-green-700">
-                    {currency(Math.max(0, parseFloat(st.totalRevenue||0) - parseFloat(parseFloat(refundStats?.total_refunded||0))))}
-                  </p>
+                  <p className="text-3xl font-bold text-green-700">{currency(netRevenue)}</p>
                   <p className="text-xs text-green-500 mt-1">gross minus refunds</p>
                 </div>
               </div>
-
-              {/* Refund rate */}
               {(() => {
-                const refundRate = (st.totalOrders||0) > 0
-                  ? ((((refundStats?.approved||0)) / (st.totalOrders||1)) * 100).toFixed(1)
-                  : '0.0';
-                const refundPct  = (st.totalRevenue||0) > 0
-                  ? ((parseFloat(parseFloat(refundStats?.total_refunded||0)) / parseFloat(st.totalRevenue||1)) * 100).toFixed(1)
-                  : '0.0';
+                const refundRate = (st.deliveredOrders||0)>0 ? ((refundStats?.approved||0)/(st.deliveredOrders||1)*100).toFixed(1) : '0.0';
+                const refundPct  = grossRevenue>0 ? ((parseFloat(st.totalRefunded||0))/grossRevenue*100).toFixed(1) : '0.0';
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-between">
@@ -1557,18 +1606,14 @@ const AdminReports = () => {
                         <p className="text-sm font-semibold text-gray-700">Refund Rate</p>
                         <p className="text-xs text-gray-400">Refunded orders / Total delivered</p>
                       </div>
-                      <span className={`text-2xl font-bold ${parseFloat(refundRate)>10?'text-red-600':parseFloat(refundRate)>5?'text-amber-600':'text-green-600'}`}>
-                        {refundRate}%
-                      </span>
+                      <span className={`text-2xl font-bold ${parseFloat(refundRate)>10?'text-red-600':parseFloat(refundRate)>5?'text-amber-600':'text-green-600'}`}>{refundRate}%</span>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-between">
                       <div>
                         <p className="text-sm font-semibold text-gray-700">Revenue Refunded</p>
                         <p className="text-xs text-gray-400">Total refunded / Gross revenue</p>
                       </div>
-                      <span className={`text-2xl font-bold ${parseFloat(refundPct)>10?'text-red-600':parseFloat(refundPct)>5?'text-amber-600':'text-green-600'}`}>
-                        {refundPct}%
-                      </span>
+                      <span className={`text-2xl font-bold ${parseFloat(refundPct)>10?'text-red-600':parseFloat(refundPct)>5?'text-amber-600':'text-green-600'}`}>{refundPct}%</span>
                     </div>
                   </div>
                 );
@@ -1576,7 +1621,6 @@ const AdminReports = () => {
             </div>
           </Card>
 
-          {/* Cancellation financial impact */}
           <Card>
             <CardHeader title="Cancellation Financial Impact" sub="Revenue and fees not collected due to cancelled orders"/>
             <div className="p-6">
@@ -1594,8 +1638,8 @@ const AdminReports = () => {
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 text-center">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Cancellation Rate</p>
                   {(() => {
-                    const total = (st.totalOrders||0)+(st.cancelledOrders||0);
-                    const rate  = total>0?((st.cancelledOrders||0)/total*100).toFixed(1):0;
+                    const total=(st.totalOrders||0)+(st.cancelledOrders||0);
+                    const rate=total>0?((st.cancelledOrders||0)/total*100).toFixed(1):0;
                     return (
                       <>
                         <p className={`text-3xl font-bold ${parseFloat(rate)>10?'text-red-600':parseFloat(rate)>5?'text-amber-600':'text-green-600'}`}>{rate}%</p>
@@ -1613,25 +1657,27 @@ const AdminReports = () => {
       {/* ══ PAYMENTS TAB ══════════════════════════════════════════════════════ */}
       {activeTab === 'payments' && (
         <div className="space-y-6">
-          {/* Payment method summary cards */}
+
+          {/* ✅ FIX 2: Payment cards now sum from sellersPay — matches the By Seller table exactly */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { method:'GCash',  orders: st.gcashOrders,  revenue: st.gcashRevenue,  color:'#3b82f6', icon:'G' },
-              { method:'PayPal', orders: st.paypalOrders, revenue: st.paypalRevenue, color:'#6366f1', icon:'P' },
-              { method:'COD',    orders: st.codOrders,    revenue: st.codRevenue,    color:'#f59e0b', icon:'C' },
-            ].map((pm,i)=>{
-              const total = (st.gcashOrders||0)+(st.paypalOrders||0)+(st.codOrders||0);
-              const pct   = total>0?((pm.orders||0)/total*100).toFixed(1):0;
+              { method:'GCash',  key:'gcash',  color:'#3b82f6', icon:'G' },
+              { method:'PayPal', key:'paypal', color:'#6366f1', icon:'P' },
+              { method:'COD',    key:'cod',    color:'#f59e0b', icon:'C' },
+            ].map((pm,i) => {
+              const { orders, revenue } = payCardTotals[pm.key];
+              const totalOrders = payCardTotals.gcash.orders + payCardTotals.paypal.orders + payCardTotals.cod.orders;
+              const pct = totalOrders > 0 ? ((orders / totalOrders) * 100).toFixed(1) : '0.0';
               return (
                 <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-gray-200">
                   <div className="flex items-center gap-3 mb-3">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-base" style={{backgroundColor:pm.color}}>{pm.icon}</div>
                     <div>
                       <p className="font-semibold text-gray-900">{pm.method}</p>
-                      <p className="text-xs text-gray-400">{pm.orders||0} orders · {pct}%</p>
+                      <p className="text-xs text-gray-400">{orders} orders · {pct}%</p>
                     </div>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">{currency(pm.revenue||0)}</p>
+                  <p className="text-2xl font-bold text-gray-900">{currency(revenue)}</p>
                   <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
                     <div className="h-2 rounded-full" style={{width:`${pct}%`,backgroundColor:pm.color}}/>
                   </div>
@@ -1640,81 +1686,63 @@ const AdminReports = () => {
             })}
           </div>
 
-          {/* Payment breakdown chart */}
           <Card>
             <CardHeader title="Revenue by Payment Method" sub="Delivered orders only"/>
             <div className="p-6">
-              {payBreakdown.length>0 ? (
-                <>
-                  <BarChart data={payBreakdown} valueKey="revenue" labelKey="method" color="#3b82f6" prefix="₱"/>
-                  <div className="mt-6 overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Method</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Orders</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Revenue</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Commission</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">% Share</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {payBreakdown.map((row,i)=>(
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-4 py-3"><Badge label={row.method.toLowerCase()}/></td>
-                            <td className="px-4 py-3 text-center font-semibold text-gray-900">{row.orders}</td>
-                            <td className="px-4 py-3 text-right text-gray-900">{currency(row.revenue)}</td>
-                            <td className="px-4 py-3 text-right text-gray-600">{currency(row.commission)}</td>
-                            <td className="px-4 py-3 text-right text-gray-500">{row.percentage}%</td>
+              {/* ✅ FIX 3: Bar chart + table now both use payCardTotals (from sellersPay)
+                  so they always match the cards above and the By Seller table below */}
+              {(() => {
+                const totalOrders = payCardTotals.gcash.orders + payCardTotals.paypal.orders + payCardTotals.cod.orders;
+                // Build unified rows from payCardTotals — same source as the cards
+                const rows = [
+                  { method:'GCASH',  orders: payCardTotals.gcash.orders,  revenue: payCardTotals.gcash.revenue,  commission: bdMap['GCASH']?.commission  || 0 },
+                  { method:'PAYPAL', orders: payCardTotals.paypal.orders, revenue: payCardTotals.paypal.revenue, commission: bdMap['PAYPAL']?.commission || 0 },
+                  { method:'COD',    orders: payCardTotals.cod.orders,    revenue: payCardTotals.cod.revenue,    commission: bdMap['COD']?.commission    || 0 },
+                ];
+                const hasData = rows.some(r => r.orders > 0);
+                if (!hasData) return <p className="text-center text-gray-400 py-10 text-sm">No payment data for this period</p>;
+                // Shape data for BarChart
+                const chartData = rows.map(r => ({ method: r.method, revenue: r.revenue }));
+                return (
+                  <>
+                    <BarChart data={chartData} valueKey="revenue" labelKey="method" color="#3b82f6" prefix="₱"/>
+                    <div className="mt-6 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Method</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Orders</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Revenue</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Commission</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">% Share</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Method</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Orders</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Revenue</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">% Share</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {[
-                        { method:'GCash',  orders:st.gcashOrders||0,  revenue:st.gcashRevenue||0  },
-                        { method:'PayPal', orders:st.paypalOrders||0, revenue:st.paypalRevenue||0 },
-                        { method:'COD',    orders:st.codOrders||0,    revenue:st.codRevenue||0    },
-                      ].map((row,i)=>{
-                        const total=(st.gcashOrders||0)+(st.paypalOrders||0)+(st.codOrders||0);
-                        return (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-4 py-3"><Badge label={row.method.toLowerCase()}/></td>
-                            <td className="px-4 py-3 text-center font-semibold text-gray-900">{row.orders}</td>
-                            <td className="px-4 py-3 text-right text-gray-900">{currency(row.revenue)}</td>
-                            <td className="px-4 py-3 text-right text-gray-500">{total>0?((row.orders/total)*100).toFixed(1):0}%</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {rows.map((row,i) => (
+                            <tr key={i} className="hover:bg-gray-50">
+                              <td className="px-4 py-3"><Badge label={row.method.toLowerCase()}/></td>
+                              <td className="px-4 py-3 text-center font-semibold text-gray-900">{row.orders}</td>
+                              <td className="px-4 py-3 text-right text-gray-900">{currency(row.revenue)}</td>
+                              <td className="px-4 py-3 text-right text-gray-600">{currency(row.commission)}</td>
+                              <td className="px-4 py-3 text-right text-gray-500">
+                                {totalOrders > 0 ? ((row.orders / totalOrders) * 100).toFixed(1) : '0.0'}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </Card>
 
-          {/* View toggle: seller summary / transactions */}
           <Card>
             <div className="px-6 py-4 border-b border-gray-100">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-                <div>
-                  <h3 className="text-base font-semibold text-gray-900">Payment Tracking</h3>
-                </div>
+                <h3 className="text-base font-semibold text-gray-900">Payment Tracking</h3>
                 <div className="flex items-center gap-2">
-                  {/* Tab toggle */}
                   <div className="flex border border-gray-200 rounded-lg overflow-hidden">
                     {[
                       {k:'breakdown',    l:`By Seller (${filteredSellersPay.length})`},
@@ -1726,18 +1754,15 @@ const AdminReports = () => {
                       </button>
                     ))}
                   </div>
-                  {/* Context-aware export */}
-                  {payView === 'breakdown'
+                  {payView==='breakdown'
                     ? <ExportGroup onExcel={()=>exportSellersPay('excel')} onCSV={()=>exportSellersPay('csv')}/>
                     : <ExportGroup onExcel={()=>exportTransactions('excel')} onCSV={()=>exportTransactions('csv')}/>
                   }
                 </div>
               </div>
 
-              {/* ── Filters row ── */}
-              {payView === 'transactions' && (
+              {payView==='transactions' && (
                 <div className="flex flex-wrap gap-2 items-center">
-                  {/* Search */}
                   <div className="relative flex-1 min-w-[180px]">
                     <svg className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -1746,7 +1771,6 @@ const AdminReports = () => {
                       value={txnSearch} onChange={e=>setTxnSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
                   </div>
-                  {/* Method filter */}
                   <select value={txnMethodF} onChange={e=>setTxnMethodF(e.target.value)}
                     className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
                     <option value="all">All Methods</option>
@@ -1754,7 +1778,6 @@ const AdminReports = () => {
                     <option value="paypal">PayPal</option>
                     <option value="cod">COD</option>
                   </select>
-                  {/* Order status filter */}
                   <select value={txnStatusF} onChange={e=>setTxnStatusF(e.target.value)}
                     className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
                     <option value="all">All Statuses</option>
@@ -1764,8 +1787,7 @@ const AdminReports = () => {
                     <option value="delivered">Delivered</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
-                  {/* Clear filters */}
-                  {(txnSearch || txnMethodF !== 'all' || txnStatusF !== 'all') && (
+                  {(txnSearch||txnMethodF!=='all'||txnStatusF!=='all') && (
                     <button onClick={()=>{setTxnSearch('');setTxnMethodF('all');setTxnStatusF('all');}}
                       className="text-xs px-2.5 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition">
                       Clear
@@ -1775,8 +1797,7 @@ const AdminReports = () => {
                 </div>
               )}
 
-              {/* ── Seller search ── */}
-              {payView === 'breakdown' && (
+              {payView==='breakdown' && (
                 <div className="relative">
                   <svg className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -1788,7 +1809,7 @@ const AdminReports = () => {
               )}
             </div>
             <div className="p-6">
-              {payView === 'breakdown' ? (
+              {payView==='breakdown' ? (
                 filteredSellersPay.length>0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1800,28 +1821,36 @@ const AdminReports = () => {
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">PayPal Orders</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">PayPal Revenue</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">COD Orders</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">COD Revenue</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase bg-blue-50">Total</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {filteredSellersPay.map((s,i)=>(
+                        {filteredSellersPay.map((sv,i) => (
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="px-4 py-3">
-                              <p className="font-medium text-gray-900 text-sm">{s.seller_name}</p>
-                              <p className="text-xs text-gray-400">{s.seller_email}</p>
+                              <p className="font-medium text-gray-900 text-sm">{sv.seller_name}</p>
+                              <p className="text-xs text-gray-400">{sv.seller_email}</p>
                             </td>
-                            <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${s.gcash_orders>0?'bg-blue-100 text-blue-800':'bg-gray-100 text-gray-400'}`}>{s.gcash_orders}</span></td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-700">{currency(s.gcash_revenue)}</td>
-                            <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${s.paypal_orders>0?'bg-indigo-100 text-indigo-800':'bg-gray-100 text-gray-400'}`}>{s.paypal_orders}</span></td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-700">{currency(s.paypal_revenue)}</td>
-                            <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${s.cod_orders>0?'bg-amber-100 text-amber-800':'bg-gray-100 text-gray-400'}`}>{s.cod_orders}</span></td>
-                            <td className="px-4 py-3 text-right bg-blue-50 font-bold text-blue-900">{currency(s.total_revenue)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sv.gcash_orders>0?'bg-blue-100 text-blue-800':'bg-gray-100 text-gray-400'}`}>{sv.gcash_orders}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-700">{currency(sv.gcash_revenue)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sv.paypal_orders>0?'bg-indigo-100 text-indigo-800':'bg-gray-100 text-gray-400'}`}>{sv.paypal_orders}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-700">{currency(sv.paypal_revenue)}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sv.cod_orders>0?'bg-amber-100 text-amber-800':'bg-gray-100 text-gray-400'}`}>{sv.cod_orders}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-700">{currency(sv.cod_revenue)}</td>
+                            <td className="px-4 py-3 text-right bg-blue-50 font-bold text-blue-900">{currency(sv.total_revenue)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                ) : <p className="text-center text-gray-400 py-10 text-sm">{sellerSearch ? 'No sellers match your search' : 'No seller payment data'}</p>
+                ) : <p className="text-center text-gray-400 py-10 text-sm">{sellerSearch?'No sellers match your search':'No seller payment data'}</p>
               ) : (
                 filteredTransactions.length>0 ? (
                   <div className="overflow-x-auto">
@@ -1840,270 +1869,55 @@ const AdminReports = () => {
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {filteredTransactions.map((t,i)=>{
-                          const orderStatusColors = {
-                            pending:    'bg-amber-100 text-amber-800',
-                            processing: 'bg-blue-100 text-blue-800',
-                            shipped:    'bg-purple-100 text-purple-800',
-                            delivered:  'bg-green-100 text-green-800',
-                            cancelled:  'bg-red-100 text-red-800',
-                            canceled:   'bg-red-100 text-red-800',
-                          };
-                          const refundColors = {
-                            pending:        'bg-amber-100 text-amber-800',
-                            seller_pending: 'bg-blue-100 text-blue-800',
-                            approved:       'bg-green-100 text-green-800',
-                            rejected:       'bg-red-100 text-red-800',
-                          };
-                          const orderStatus   = String(t.order_status || '');
-                          const isRefundApproved = t.refund?.status === 'approved';
-                          // "Refund needed" only if: cancelled + paid + NO approved refund yet
-                          const cancelledPaid = ['cancelled','canceled'].includes(orderStatus.toLowerCase()) &&
-                            t.payment_status === 'paid' &&
-                            !isRefundApproved &&
-                            t.payment_method !== 'cod';  // COD cancelled = no online payment
-                          const pendingPaid   = orderStatus.toLowerCase() === 'pending' &&
-                            t.payment_status === 'paid';
-
+                          const osColors={pending:'bg-amber-100 text-amber-800',processing:'bg-blue-100 text-blue-800',shipped:'bg-purple-100 text-purple-800',delivered:'bg-green-100 text-green-800',cancelled:'bg-red-100 text-red-800',canceled:'bg-red-100 text-red-800'};
+                          const rfColors={pending:'bg-amber-100 text-amber-800',seller_pending:'bg-blue-100 text-blue-800',approved:'bg-green-100 text-green-800',rejected:'bg-red-100 text-red-800'};
+                          const oStatus=String(t.order_status||'');
+                          const isRefundApproved=t.refund?.status==='approved';
+                          const cancelledPaid=['cancelled','canceled'].includes(oStatus.toLowerCase())&&t.payment_status==='paid'&&!isRefundApproved&&t.payment_method!=='cod';
+                          const pendingPaid=oStatus.toLowerCase()==='pending'&&t.payment_status==='paid';
                           return (
-                            <tr key={i} className={`hover:bg-gray-50 transition ${
-                              cancelledPaid ? 'bg-red-50/40' : pendingPaid ? 'bg-amber-50/30' : ''
-                            }`}>
+                            <tr key={i} className={`hover:bg-gray-50 transition ${cancelledPaid?'bg-red-50/40':pendingPaid?'bg-amber-50/30':''}`}>
                               <td className="px-4 py-3">
                                 <p className="font-mono text-xs font-semibold text-gray-900">{t.order_number}</p>
-                                {cancelledPaid && (
-                                  <span className="inline-flex mt-0.5 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-medium rounded">
-                                    ⚠️ Refund needed
-                                  </span>
-                                )}
+                                {cancelledPaid&&<span className="inline-flex mt-0.5 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-medium rounded">⚠️ Refund needed</span>}
                               </td>
-                              <td className="px-4 py-3 text-right">
-                                <p className="font-semibold text-gray-900">{currency(t.total_amount)}</p>
-                              </td>
+                              <td className="px-4 py-3 text-right"><p className="font-semibold text-gray-900">{currency(t.total_amount)}</p></td>
                               <td className="px-4 py-3 text-center"><Badge label={t.payment_method}/></td>
                               <td className="px-4 py-3 text-center">
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                  t.payment_status === 'paid'   ? 'bg-green-100 text-green-800' :
-                                  t.payment_status === 'failed' ? 'bg-red-100 text-red-800'    :
-                                                                   'bg-amber-100 text-amber-800'
-                                }`}>
-                                  {t.payment_status === 'paid' ? '✓ Paid' : (t.payment_status || '—')}
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${t.payment_status==='paid'?'bg-green-100 text-green-800':t.payment_status==='failed'?'bg-red-100 text-red-800':'bg-amber-100 text-amber-800'}`}>
+                                  {t.payment_status==='paid'?'✓ Paid':(t.payment_status||'—')}
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-center">
-                                {orderStatus ? (
-                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    orderStatusColors[orderStatus.toLowerCase()] || 'bg-gray-100 text-gray-700'
-                                  }`}>
-                                    {orderStatus.charAt(0).toUpperCase() + orderStatus.slice(1)}
-                                  </span>
-                                ) : <span className="text-xs text-gray-400">—</span>}
+                                {oStatus ? <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${osColors[oStatus.toLowerCase()]||'bg-gray-100 text-gray-700'}`}>{oStatus.charAt(0).toUpperCase()+oStatus.slice(1)}</span> : <span className="text-xs text-gray-400">—</span>}
                               </td>
                               <td className="px-4 py-3 text-center">
-                                {t.refund ? (
+                                {t.refund?(
                                   <div>
-                                    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      refundColors[t.refund.status] || 'bg-gray-100 text-gray-700'
-                                    }`}>
-                                      {t.refund.status === 'approved'       ? '↩ Refunded'  :
-                                       t.refund.status === 'pending'        ? '⏳ Pending'   :
-                                       t.refund.status === 'seller_pending' ? '📦 With Seller':
-                                       t.refund.status === 'rejected'       ? '✗ Rejected'  : t.refund.status}
+                                    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${rfColors[t.refund.status]||'bg-gray-100 text-gray-700'}`}>
+                                      {t.refund.status==='approved'?'↩ Refunded':t.refund.status==='pending'?'⏳ Pending':t.refund.status==='seller_pending'?'📦 With Seller':'✗ Rejected'}
                                     </span>
                                     <p className="text-[10px] text-gray-400 mt-0.5">{currency(t.refund.refund_amount)}</p>
                                   </div>
-                                ) : <span className="text-[10px] text-gray-300">—</span>}
+                                ):<span className="text-[10px] text-gray-300">—</span>}
                               </td>
                               <td className="px-4 py-3">
-                                {t.payment_capture_id
-                                  ? <p className="font-mono text-[10px] text-green-600 truncate max-w-[130px]" title={t.payment_capture_id}>{t.payment_capture_id}</p>
-                                  : t.payment_intent_id
-                                  ? <p className="font-mono text-[10px] text-gray-400 truncate max-w-[130px]" title={t.payment_intent_id}>{t.payment_intent_id}</p>
-                                  : <span className="text-[10px] text-gray-300">—</span>
-                                }
+                                {t.payment_capture_id?<p className="font-mono text-[10px] text-green-600 truncate max-w-[130px]" title={t.payment_capture_id}>{t.payment_capture_id}</p>:t.payment_intent_id?<p className="font-mono text-[10px] text-gray-400 truncate max-w-[130px]" title={t.payment_intent_id}>{t.payment_intent_id}</p>:<span className="text-[10px] text-gray-300">—</span>}
                               </td>
-                              <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                                {new Date(t.order_date).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' })}
-                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{new Date(t.order_date).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
-                ) : <p className="text-center text-gray-400 py-10 text-sm">{txnSearch || txnMethodF !== 'all' || txnStatusF !== 'all' ? 'No transactions match your filters' : 'No transactions found'}</p>
+                ) : <p className="text-center text-gray-400 py-10 text-sm">{txnSearch||txnMethodF!=='all'||txnStatusF!=='all'?'No transactions match your filters':'No transactions found'}</p>
               )}
             </div>
           </Card>
         </div>
       )}
 
-      {/* ══ ACTIVITY LOGS TAB ══════════════════════════════════════════════ */}
-      {activeTab === 'logs' && (
-        <div className="space-y-4">
-          {/* Filters */}
-          <Card>
-            <div className="px-5 py-4 flex flex-wrap items-center gap-3">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Filter:</span>
-              {/* Category */}
-              <select value={logCategory}
-                onChange={e => { setLogCategory(e.target.value); fetchLogs(e.target.value, logRole, 0); }}
-                className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
-                <option value="all">All Categories</option>
-                <option value="auth">Auth (Login/Register)</option>
-                <option value="order">Orders</option>
-                <option value="refund">Refunds</option>
-                <option value="product">Products</option>
-                <option value="user">Users</option>
-              </select>
-              {/* Role */}
-              <select value={logRole}
-                onChange={e => { setLogRole(e.target.value); fetchLogs(logCategory, e.target.value, 0); }}
-                className="text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-600">
-                <option value="all">All Roles</option>
-                <option value="admin">Admin</option>
-                <option value="seller">Seller</option>
-                <option value="buyer">Buyer</option>
-              </select>
-              {/* Reset */}
-              {(logCategory !== 'all' || logRole !== 'all') && (
-                <button onClick={() => { setLogCategory('all'); setLogRole('all'); fetchLogs('all', 'all', 0); }}
-                  className="text-xs text-blue-600 hover:underline">Reset</button>
-              )}
-              <span className="ml-auto text-xs text-gray-400">{logsTotal.toLocaleString()} total logs</span>
-              <button onClick={() => fetchLogs(logCategory, logRole, logOffset)} disabled={logsLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-200 transition disabled:opacity-50">
-                <svg className={`w-3.5 h-3.5 ${logsLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-                Refresh
-              </button>
-            </div>
-          </Card>
-
-          {/* Logs Table */}
-          <Card>
-            {logsLoading ? (
-              <div className="flex items-center justify-center p-16">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"/>
-              </div>
-            ) : logs.length === 0 ? (
-              <div className="text-center p-16">
-                <p className="text-gray-400 text-sm">No activity logs found</p>
-                <p className="text-gray-300 text-xs mt-1">Logs appear here as users interact with the platform</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b-2 border-gray-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Time</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">User</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Category</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
-                      {/* <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">IP</th> */}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {logs.map((log, i) => {
-                      const catColors = {
-                        auth:    'bg-green-100 text-green-800',
-                        order:   'bg-blue-100 text-blue-800',
-                        refund:  'bg-orange-100 text-orange-800',
-                        product: 'bg-purple-100 text-purple-800',
-                        user:    'bg-gray-100 text-gray-700',
-                      };
-                      const roleColors = {
-                        admin:  'bg-purple-100 text-purple-700',
-                        seller: 'bg-blue-100 text-blue-700',
-                        buyer:  'bg-green-100 text-green-700',
-                      };
-                      const actionIcon = {
-                        refund_approved:        '✅',
-                        refund_rejected:        '❌',
-                        refund_submitted:       '📋',
-                        refund_return_confirmed:'📦',
-                        order_created:          '🛒',
-                        order_cancelled:        '❌',
-                        order_status_delivered: '✅',
-                        order_status_shipped:   '🚚',
-                        user_registered:        '👤',
-                        user_blocked:           '🚫',
-                        user_unblocked:         '✅',
-                        product_approved:       '✅',
-                        product_rejected:       '❌',
-                        product_created_approved:'📦',
-                        product_deleted:        '🗑️',
-                      };
-                      return (
-                        <tr key={log.id || i} className="hover:bg-gray-50 transition">
-                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                            <p>{new Date(log.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric' })}</p>
-                            <p className="text-gray-400">{new Date(log.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' })}</p>
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="text-xs font-medium text-gray-900 truncate max-w-[120px]">
-                              {log.user?.full_name || 'System'}
-                            </p>
-                            <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${roleColors[log.role] || 'bg-gray-100 text-gray-600'}`}>
-                              {log.role || 'system'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${catColors[log.category] || 'bg-gray-100 text-gray-700'}`}>
-                              {log.category}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="text-xs text-gray-700 whitespace-nowrap">
-                              {actionIcon[log.action] || '•'} {log.action?.replace(/_/g, ' ')}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3 max-w-[280px]">
-                            <p className="text-xs text-gray-700 truncate" title={log.description}>
-                              {log.description}
-                            </p>
-                            {/* Show key metadata inline */}
-                            {log.metadata?.amount && (
-                              <p className="text-[10px] text-gray-400 mt-0.5">₱{parseFloat(log.metadata.amount).toFixed(2)}</p>
-                            )}
-                          </td>
-                          {/* <td className="px-4 py-3 text-[10px] text-gray-400 font-mono">
-                            {log.ip_address || '—'}
-                          </td> */}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Pagination */}
-            {logsTotal > LOG_LIMIT && (
-              <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
-                <p className="text-xs text-gray-500">
-                  Showing {logOffset + 1}–{Math.min(logOffset + LOG_LIMIT, logsTotal)} of {logsTotal.toLocaleString()} logs
-                </p>
-                <div className="flex gap-2">
-                  <button disabled={logOffset === 0}
-                    onClick={() => fetchLogs(logCategory, logRole, Math.max(0, logOffset - LOG_LIMIT))}
-                    className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-40 transition">
-                    ← Previous
-                  </button>
-                  <button disabled={logOffset + LOG_LIMIT >= logsTotal}
-                    onClick={() => fetchLogs(logCategory, logRole, logOffset + LOG_LIMIT)}
-                    className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition">
-                    Next →
-                  </button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 bg-black/10 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-xl flex items-center gap-3">

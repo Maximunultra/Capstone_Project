@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 // const API_BASE_URL = "http://localhost:5000/api";
-const API_BASE_URL = "https://capstone-project-1msq.onrender.com/api";
+const API_BASE_URL = "https://capstone-project-1-shnf.onrender.com/api";
 
 const AdminEditSellerPage = () => {
   const { id } = useParams();
@@ -162,6 +162,7 @@ const AdminEditSellerPage = () => {
         store_name:    form.store_name.trim(),
         birthdate:     form.birthdate || null,
         profile_image: profileImageUrl,
+        admin_id:      currentUser.id,
       };
       if (form.password) payload.password = form.password;
       await axios.put(`${API_BASE_URL}/users/${id}`, payload, authHeaders);

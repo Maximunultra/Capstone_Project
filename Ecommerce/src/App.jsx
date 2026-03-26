@@ -13,6 +13,7 @@ import CategoryRulesPage from "./admin/Pages/CategoryRulesPage";
 import AdminEditSellerPage from "./admin/Pages/AdminEditSellerPage";
 import AdminMessagesPage from "./admin/Pages/AdminMessagesPage";
 import AdminRefundsPage from "./admin/Pages/AdminRefundsPage";
+import AdminActivityLogs from "./admin/Pages/AdminActivityLogs";
 // Buyer Components
 import BuyerDashboard from "./user_buyer/Pages/Dashboard";
 import LandingLayout from "./user_buyer/Components/LandingLayout";
@@ -83,7 +84,7 @@ function SessionKickedModal({ onConfirm }) {
   );
 }
 
-const API_URL = "https://capstone-project-1msq.onrender.com";
+const API_URL = "https://capstone-project-1-shnf.onrender.com";
 
 // Global trigger for axios interceptor to show modal
 let triggerSessionModal = null;
@@ -244,6 +245,7 @@ const App = () => {
                   <Route path="/users/edit/:id" element={<AdminEditSellerPage />} />
                   <Route path="/messages" element={<AdminMessagesPage />} />
                   <Route path="/refunds" element={<AdminRefundsPage />} />
+                  <Route path="/settings/activity-logs" element={<AdminActivityLogs />} />
                 </Routes>
               </AdminLayout>
             </PrivateRoute>

@@ -93,7 +93,7 @@ export default function Login({ onAuthChange }) {
     if (!identifier || !password) { showToast('Please enter your email/username and password', 'error'); return; }
     setLoading(true);
     try {
-      const res = await axios.post('https://capstone-project-1msq.onrender.com/api/auth/login', { email: identifier.trim(), password });
+      const res = await axios.post('https://capstone-project-1-shnf.onrender.com/api/auth/login', { email: identifier.trim(), password });
       const { token, user } = res.data;
       if (token) {
         localStorage.setItem('token', token);

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Upload, User, Mail, Lock, Phone, MapPin, AlertCircle, CheckCircle, ArrowLeft, Calendar, AtSign } from 'lucide-react';
 
-const API_BASE_URL = 'https://capstone-project-1msq.onrender.com/api';
+const API_BASE_URL = 'https://capstone-project-1-shnf.onrender.com/api';
+// const API_BASE_URL = 'http://localhost:5000/api';
 
 const UserRegistration = ({ onBackToLogin }) => {
   const [formData, setFormData] = useState({
